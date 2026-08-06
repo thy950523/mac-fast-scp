@@ -25,6 +25,10 @@ targets:
     platform: macOS
     sources:
       - path: Sources/FastSCP
+        excludes:
+          - Resources
+      - path: Sources/FastSCP/Resources/AppIcon.icns
+        buildPhase: resources
     dependencies:
       - target: FastSCPCore
         embed: true
@@ -33,10 +37,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhuzhong.FastSCP
         CODE_SIGN_ENTITLEMENTS: Sources/FastSCP/FastSCP.entitlements
+        MARKETING_VERSION: "0.1.0"
     info:
       path: Sources/FastSCP/Info.plist
       properties:
         CFBundleDisplayName: FastSCP
+        CFBundleIconFile: AppIcon
         CFBundleShortVersionString: "0.1.0"
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
@@ -55,10 +61,12 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zhuzhong.FastSCP.FinderSync
         CODE_SIGN_ENTITLEMENTS: Sources/FastSCPFinderSync/FastSCPFinderSync.entitlements
+        MARKETING_VERSION: "0.1.0"
     info:
       path: Sources/FastSCPFinderSync/Info.plist
       properties:
         CFBundleDisplayName: FastSCP Finder Extension
+        CFBundleShortVersionString: "0.1.0"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.FinderSync
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FinderSync
