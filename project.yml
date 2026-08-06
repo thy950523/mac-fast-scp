@@ -1,0 +1,74 @@
+name: FastSCP
+options:
+  bundleIdPrefix: com.zhuzhong
+  deploymentTarget:
+    macOS: "14.0"
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_HARDENED_RUNTIME: YES
+targets:
+  FastSCPCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/FastSCPCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuzhong.FastSCP.Core
+        ENABLE_TESTABILITY: YES
+        GENERATE_INFOPLIST_FILE: YES
+  FastSCP:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/FastSCP
+    dependencies:
+      - target: FastSCPCore
+        embed: true
+      - target: FastSCPFinderSync
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuzhong.FastSCP
+        CODE_SIGN_ENTITLEMENTS: Sources/FastSCP/FastSCP.entitlements
+    info:
+      path: Sources/FastSCP/Info.plist
+      properties:
+        CFBundleDisplayName: FastSCP
+        CFBundleShortVersionString: "0.1.0"
+        LSUIElement: true
+        LSMinimumSystemVersion: "14.0"
+        CFBundleURLTypes:
+          - CFBundleURLName: com.zhuzhong.FastSCP
+            CFBundleURLSchemes: [fastscp]
+  FastSCPFinderSync:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Sources/FastSCPFinderSync
+    dependencies:
+      - target: FastSCPCore
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zhuzhong.FastSCP.FinderSync
+        CODE_SIGN_ENTITLEMENTS: Sources/FastSCPFinderSync/FastSCPFinderSync.entitlements
+    info:
+      path: Sources/FastSCPFinderSync/Info.plist
+      properties:
+        CFBundleDisplayName: FastSCP Finder Extension
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.FinderSync
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FinderSync
+  FastSCPCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/FastSCPCoreTests
+    dependencies:
+      - target: FastSCPCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
