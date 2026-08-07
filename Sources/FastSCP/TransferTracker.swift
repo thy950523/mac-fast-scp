@@ -95,7 +95,7 @@ private enum LocalScanner {
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey,
                                       .isSymbolicLinkKey, .fileSizeKey]
         for root in urls {
-            count += 1
+            let rootURL = root.hasDirectoryPath ? root : root.deletingLastPathComponent()
             if let e = fm.enumerator(at: root, includingPropertiesForKeys: keys,
                                      options: [.skipsHiddenFiles]) {
                 for case let url as URL in e {
@@ -103,11 +103,27 @@ private enum LocalScanner {
                     if rv?.isSymbolicLink == true || rv?.isDirectory == true { continue }
                     let size = Int64(rv?.fileSize ?? 0)
                     total += size
+                    count += 1
+                    // Key by basename and by path relative to the selection root;
+                    // scp prints the relative path for files inside a recursive
+                    // directory, and just the basename for top-level files.
                     lookup[url.lastPathComponent] = size
+                    if let rel = relativePath(url, from: rootURL) {
+                        lookup[rel] = size
+                    }
                 }
             }
         }
         return PreparedTransfer(totalBytes: total, totalFiles: count,
                                 lookup: lookup, sizeKnowledge: .full)
+    }
+
+    private static func relativePath(_ url: URL, from root: URL) -> String? {
+        let rootPath = root.standardizedFileURL.path
+        let filePath = url.standardizedFileURL.path
+        guard filePath.hasPrefix(rootPath) else { return nil }
+        var rel = String(filePath.dropFirst(rootPath.count))
+        if rel.hasPrefix("/") { rel.removeFirst() }
+        return rel.isEmpty ? nil : rel
     }
 }
