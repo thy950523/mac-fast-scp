@@ -6,6 +6,7 @@ import FastSCPCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let coordinator = URLCoordinator()
     private var panelController: DestinationPanelController?
+    private var receivePanelController: ReceivePanelController?
     private var aboutController: AboutPanelController?
     private var statusItemController: StatusItemController?
     private var didHandleURLEvent = false
@@ -37,6 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .fastSCPShowAbout,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(showReceivePanelFromNotification),
+            name: .fastSCPShowReceivePanel,
+            object: nil
+        )
 
         // If launched directly (no fastscp:// URL), show the about window.
         DispatchQueue.main.async { [weak self] in
@@ -61,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showPanelFromNotification() {
+        react()
+    }
+
+    @objc private func showReceivePanelFromNotification() {
         react()
     }
 
@@ -99,6 +110,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let quick = coordinator.quickRequest {
             coordinator.quickRequest = nil
             runQuick(quick)
+        }
+        if let req = coordinator.receiveRequest {
+            coordinator.receiveRequest = nil
+            NSApp.setActivationPolicy(.regular)
+            receivePanelController = ReceivePanelController(
+                destURL: req.destURL, allowChangeDest: req.allowChangeDest) { [weak self] in
+                self?.receivePanelController = nil
+                NSApp.setActivationPolicy(.accessory)
+            }
+            receivePanelController?.show()
         }
     }
 
