@@ -52,6 +52,52 @@ actor SSHExecutor {
         try await runWithProgress(exec: "/usr/bin/scp", args: args, progress: progress)
     }
 
+    /// Determine remote total size with a two-tier fallback:
+    /// 1. `find ... -printf '%s %f\n'` (GNU find) → per-file sizes (`.full`)
+    /// 2. `find ... -type f` (count) + `du -sk` (total) → `.totalsOnly`
+    /// 3. neither works → `.unknown` (transfer still runs, progress is indeterminate)
+    func probeRemoteSizes(alias: String, remotePath: String, names: [String]) async -> PreparedTransfer {
+        let base = remotePath.hasSuffix("/") ? String(remotePath.dropLast()) : remotePath
+        let paths = names.map { "'\(base)/\($0)'" }
+        if let full = await probeTier1(alias: alias, paths: paths) { return full }
+        if let totals = await probeTier2(alias: alias, paths: paths) { return totals }
+        return PreparedTransfer(totalBytes: 0, totalFiles: 0, lookup: [:], sizeKnowledge: .unknown)
+    }
+
+    private func probeTier1(alias: String, paths: [String]) async -> PreparedTransfer? {
+        var args = [alias, "find"]
+        args.append(contentsOf: paths)
+        args.append(contentsOf: ["-type", "f", "-printf", "'%s %f\\n'"])
+        do {
+            let r = try await run(exec: "/usr/bin/ssh", args: args)
+            guard let s = RemoteSizeProbe.parseFindPrintf(r.stdout) else { return nil }
+            return PreparedTransfer(totalBytes: s.totalBytes, totalFiles: s.totalFiles,
+                                    lookup: s.lookup, sizeKnowledge: .full)
+        } catch {
+            return nil
+        }
+    }
+
+    private func probeTier2(alias: String, paths: [String]) async -> PreparedTransfer? {
+        do {
+            var cArgs = [alias, "find"]
+            cArgs.append(contentsOf: paths)
+            cArgs.append(contentsOf: ["-type", "f"])
+            let count = RemoteSizeProbe.parseFindFileCount(
+                try await run(exec: "/usr/bin/ssh", args: cArgs).stdout)
+            guard count > 0 else { return nil }
+
+            var dArgs = [alias, "du", "-sk"]
+            dArgs.append(contentsOf: paths)
+            let duOut = try await run(exec: "/usr/bin/ssh", args: dArgs).stdout
+            guard let kb = RemoteSizeProbe.parseDuTotalKB(duOut) else { return nil }
+            return PreparedTransfer(totalBytes: kb * 1024, totalFiles: count,
+                                    lookup: [:], sizeKnowledge: .totalsOnly)
+        } catch {
+            return nil
+        }
+    }
+
     func cancel() {
         runningProcess?.terminate()
         runningProcess = nil
