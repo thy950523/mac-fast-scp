@@ -173,9 +173,13 @@ actor SSHExecutor {
         let out = Pipe(), err = Pipe()
         proc.standardOutput = out
         proc.standardError = err
-        // `script` misbehaves (exit 1, no pty) when its stdin is a pipe; give it
-        // /dev/null so the child's controlling tty setup succeeds.
-        proc.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+        // `script` gives scp a pty. If stdin is /dev/null, ssh sees a pty-ish
+        // environment with an immediate EOF and aborts keychain/agent auth with
+        // "Permission denied" before the user can approve the keychain prompt.
+        // An empty but OPEN pipe makes reads block (not EOF), so ssh waits for
+        // ssh-agent / the keychain prompt to resolve.
+        let inputPipe = Pipe()
+        proc.standardInput = inputPipe
 
         // Accumulate all output (progress + any remote error text) so we can
         // surface a meaningful message on failure.
