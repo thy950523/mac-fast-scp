@@ -9,48 +9,78 @@ class FinderSync: FIFinderSync {
         FIFinderSyncController.default().directoryURLs = [URL(fileURLWithPath: "/")]
     }
 
+    /// Tracks the directory the active Finder window is showing — used as the
+    /// "current directory" target for 接收 (receive). Updated by Finder Sync as
+    /// the user navigates. May be nil before any window is observed; the receive
+    /// menu item is then hidden (send still works via selection).
+    private var currentDirectory: URL?
+
+    override func beginObservingDirectory(at url: URL) {
+        currentDirectory = url
+    }
+
     override func menu(for menuKind: FIMenuKind) -> NSMenu? {
         let menu = NSMenu(title: "FastSCP")
+        let parent = NSMenuItem(title: "FastSCP", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "FastSCP")
+
+        let selection = FIFinderSyncController.default().selectedItemURLs() ?? []
         let recents = RecentStore.shared().load()
         let maxRecent = min(recents.count, FastSCPConfig.maxRecentDestinations)
 
-        if maxRecent == 0 {
-            // No history yet: collapse the single entry to the top level.
-            let item = NSMenuItem(title: "传送到服务器…",
-                                  action: #selector(chooseDestination(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.image = Self.menuIcon
-            menu.addItem(item)
-            return menu
-        }
-
-        // With history: top-level "传送到服务器 ▸" with submenu.
-        let parent = NSMenuItem(title: "传送到服务器",
-                                action: nil, keyEquivalent: "")
-        let submenu = NSMenu(title: "传送到服务器")
-
-        let manual = NSMenuItem(title: "手动选择…",
-                                action: #selector(chooseDestination(_:)),
-                                keyEquivalent: "")
-        manual.target = self
-        manual.image = Self.menuIcon
-        submenu.addItem(manual)
-
-        if maxRecent > 0 {
-            submenu.addItem(.separator())
-            // RecentDestinations.add() keeps the array in time-desc order
-            // (newest at index 0) and caps at maxRecentDestinations,
-            // so the first `maxRecent` entries are exactly what we want.
-            for r in recents.prefix(maxRecent) {
-                let item = NSMenuItem(title: "\(r.alias):\(r.remotePath)",
-                                      action: #selector(quickSend(_:)),
-                                      keyEquivalent: "")
+        // ── 发送段（需选中项；源 = 选中文件/文件夹）──
+        var addedSend = false
+        if !selection.isEmpty {
+            // 一键发送到上次目标（仅当有历史）
+            if let last = recents.first {
+                let item = NSMenuItem(title: "发送到 \(last.alias):\(last.remotePath)",
+                                      action: #selector(quickSend(_:)), keyEquivalent: "")
                 item.target = self
-                item.image = Self.recentIcon
-                item.representedObject = r
+                item.image = Self.menuIcon
+                item.representedObject = last
                 submenu.addItem(item)
             }
+            // 最近目标子菜单
+            if maxRecent > 0 {
+                let recentParent = NSMenuItem(title: "最近目标", action: nil, keyEquivalent: "")
+                let recentSub = NSMenu(title: "最近目标")
+                for r in recents.prefix(maxRecent) {
+                    let item = NSMenuItem(title: "\(r.alias):\(r.remotePath)",
+                                          action: #selector(quickSend(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.image = Self.recentIcon
+                    item.representedObject = r
+                    recentSub.addItem(item)
+                }
+                recentParent.submenu = recentSub
+                recentParent.image = Self.recentIcon
+                submenu.addItem(recentParent)
+            }
+            // 手动选择目标
+            let manual = NSMenuItem(title: "手动选择目标…",
+                                    action: #selector(chooseDestination(_:)), keyEquivalent: "")
+            manual.target = self
+            manual.image = Self.menuIcon
+            submenu.addItem(manual)
+            addedSend = true
+        }
+
+        // ── 接收段（需当前目录；目标 = 当前 Finder 目录）──
+        if let dest = currentDirectory {
+            if addedSend { submenu.addItem(.separator()) }
+            let recv = NSMenuItem(title: "从服务器接收…",
+                                  action: #selector(receive(_:)), keyEquivalent: "")
+            recv.target = self
+            recv.image = Self.receiveIcon
+            recv.representedObject = dest.path
+            submenu.addItem(recv)
+        }
+
+        // 兜底：既无选中也无当前目录（极少见）
+        if submenu.items.isEmpty {
+            let off = NSMenuItem(title: "FastSCP 不可用", action: nil, keyEquivalent: "")
+            off.isEnabled = false
+            submenu.addItem(off)
         }
 
         parent.submenu = submenu
@@ -79,6 +109,7 @@ class FinderSync: FIFinderSync {
     // Built fresh on every menu(for:) invocation, so theme changes are picked up.
     private static var menuIcon: NSImage? { makeSymbol(name: "tray.and.arrow.up", pointSize: 14) }
     private static var recentIcon: NSImage? { makeSymbol(name: "clock", pointSize: 12) }
+    private static var receiveIcon: NSImage? { makeSymbol(name: "tray.and.arrow.down", pointSize: 14) }
 
     /// Render `symbol` into a fresh image whose opaque pixels are `color`.
     /// Preserves the symbol's silhouette (alpha mask).
@@ -107,6 +138,13 @@ class FinderSync: FIFinderSync {
     @objc func chooseDestination(_ sender: NSMenuItem) {
         guard let token = writeSelectionBatch() else { return }
         openURL(action: "choose", token: token, extra: [:])
+    }
+
+    @objc func receive(_ sender: NSMenuItem) {
+        guard let destPath = sender.representedObject as? String, !destPath.isEmpty else { return }
+        // No local sources for receive → empty token; the app ignores the
+        // `list` param in the receive branch.
+        openURL(action: "receive", token: "", extra: ["dest": destPath])
     }
 
     // MARK: - handoff helpers
