@@ -22,4 +22,28 @@ final class SCPProgressParserTests: XCTestCase {
     func testRejectsPercentOver100() {
         XCTAssertNil(SCPProgressParser.parse("foo 150% bad"))
     }
+
+    func testParsesFileName() {
+        let line = "\rlogs/app.log                                62%   74MB 12.3MB/s   0:00:04"
+        XCTAssertEqual(SCPProgressParser.parse(line)?.fileName, "logs/app.log")
+    }
+
+    func testParsesRateKB() {
+        let p = SCPProgressParser.parse("\rREADME.md  100%   12KB 123.4KB/s   0:00:00")
+        XCTAssertNotNil(p?.rateBytesPerSec)
+        XCTAssertGreaterThan(p!.rateBytesPerSec!, 0)
+    }
+
+    func testParsesRateMB() {
+        let p = SCPProgressParser.parse("\rbig.bin  45%  450MB  10.0MB/s   0:00:05")
+        XCTAssertGreaterThan(p!.rateBytesPerSec!, 1_000_000)
+    }
+
+    func testPercentOnlyLineHasNilNameAndRate() {
+        let p = SCPProgressParser.parse("42%")
+        XCTAssertNotNil(p)
+        XCTAssertEqual(p?.percent, 42)
+        XCTAssertNil(p?.fileName)
+        XCTAssertNil(p?.rateBytesPerSec)
+    }
 }

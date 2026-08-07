@@ -2,21 +2,68 @@ import Foundation
 
 public struct SCPProgress: Equatable, Sendable {
     public let percent: Int
+    public let fileName: String?
+    public let rateBytesPerSec: Int64?
     public let detail: String
-    public init(percent: Int, detail: String) {
+
+    public init(percent: Int, fileName: String?, rateBytesPerSec: Int64?, detail: String) {
         self.percent = percent
+        self.fileName = fileName
+        self.rateBytesPerSec = rateBytesPerSec
         self.detail = detail
     }
 }
 
 public enum SCPProgressParser {
     /// Best-effort parse of an OpenSSH `scp` stderr progress line:
-    /// "<name><spaces>NNN%<size> <rate> <eta>".
+    /// "\r<name><spaces>NNN%<size> <rate> <eta>".
+    /// Returns nil if the line carries no percent at all.
     public static func parse(_ line: String) -> SCPProgress? {
-        guard let range = line.range(of: #"\b\d{1,3}%"#, options: .regularExpression) else { return nil }
-        let numberText = String(line[range].dropLast())  // strip trailing '%'
+        let stripped = line.hasPrefix("\r") ? String(line.dropFirst()) : line
+        guard let r = stripped.range(of: #"\b\d{1,3}%"#, options: .regularExpression) else {
+            return nil
+        }
+        let numberText = String(stripped[r].dropLast())
         guard let pct = Int(numberText), (0...100).contains(pct) else { return nil }
-        let detail = String(line[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        return SCPProgress(percent: pct, detail: detail)
+
+        let fileName = String(stripped[..<r.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = String(stripped[r.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return SCPProgress(
+            percent: pct,
+            fileName: fileName.isEmpty ? nil : fileName,
+            rateBytesPerSec: parseRate(from: detail),
+            detail: detail
+        )
+    }
+
+    /// Parse "12.3MB/s", "456KB/s", "1.2GB/s" into bytes/second. Returns nil if absent.
+    static func parseRate(from detail: String) -> Int64? {
+        guard let r = detail.range(of: #"(\d+(?:\.\d+)?)\s*(K|M|G)?B/s"#, options: .regularExpression)
+        else { return nil }
+        let token = detail[r]
+        var chars: [Character] = []
+        var unit: Character = "B"
+        for c in token {
+            if c.isNumber || c == "." {
+                chars.append(c)
+            } else if c == "K" || c == "M" || c == "G" {
+                unit = c
+                break
+            } else if !chars.isEmpty {
+                break
+            }
+        }
+        guard let n = Double(String(chars)), n >= 0 else { return nil }
+        let mult: Double
+        switch unit {
+        case "K": mult = 1024
+        case "M": mult = 1024 * 1024
+        case "G": mult = 1024 * 1024 * 1024
+        default:  mult = 1
+        }
+        return Int64(n * mult)
     }
 }
