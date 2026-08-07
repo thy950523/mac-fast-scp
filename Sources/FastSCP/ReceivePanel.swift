@@ -190,11 +190,15 @@ struct ReceiveView: View {
                                path: viewModel.currentPath,
                                onCancel: { viewModel.cancelTransfer() })
         case .failed(let msg):
+            let cancelled = msg == "已取消"
             VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text("接收失败").font(.headline)
-                Text(msg)
-                    .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                Image(systemName: cancelled ? "xmark.circle" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(cancelled ? Color.secondary : .orange)
+                Text(cancelled ? "已取消接收" : "接收失败").font(.headline)
+                if !cancelled {
+                    Text(msg)
+                        .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                }
                 Button("关闭", role: .cancel) { onClose() }
             }
             .padding(.top, 8)

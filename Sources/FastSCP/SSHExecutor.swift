@@ -4,6 +4,7 @@ import FastSCPCore
 enum SSHError: LocalizedError {
     case listingFailed(alias: String, stderr: String)
     case transferFailed(stderr: String)
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -11,6 +12,8 @@ enum SSHError: LocalizedError {
             return "无法列出 \(alias) 的目录\n\(stderr)"
         case let .transferFailed(stderr):
             return "传输失败:\n\(stderr)"
+        case .cancelled:
+            return "已取消"
         }
     }
 }
@@ -20,6 +23,7 @@ enum SSHError: LocalizedError {
 actor SSHExecutor {
     static let shared = SSHExecutor()
     private var runningProcess: Process?
+    private var cancelled = false
 
     /// `ssh <alias> ls -ap <path>` → directory entries (filtered to dirs).
     func listDirectory(alias: String, path: String) async throws -> [RemoteEntry] {
@@ -99,6 +103,7 @@ actor SSHExecutor {
     }
 
     func cancel() {
+        cancelled = true
         runningProcess?.terminate()
         runningProcess = nil
     }
@@ -129,6 +134,7 @@ actor SSHExecutor {
 
     private func runWithProgress(exec: String, args: [String],
                                  progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
+        cancelled = false
         NSLog("FastSCP[ssh] exec=%@ args=%@", exec, args.joined(separator: " "))
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exec)
@@ -159,6 +165,10 @@ actor SSHExecutor {
 
         let errData = err.fileHandleForReading.readDataToEndOfFile()
         let stderr = String(data: errData, encoding: .utf8) ?? ""
+        if cancelled {
+            cancelled = false
+            throw SSHError.cancelled
+        }
         if proc.terminationStatus != 0 {
             throw SSHError.transferFailed(stderr: stderr)
         }

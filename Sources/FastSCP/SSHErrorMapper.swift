@@ -9,6 +9,7 @@ enum SSHErrorMapper {
             switch e {
             case .listingFailed(_, let s): raw = s
             case .transferFailed(let s): raw = s
+            case .cancelled: return "已取消"
             }
         } else {
             raw = error.localizedDescription
