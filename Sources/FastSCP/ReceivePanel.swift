@@ -11,7 +11,7 @@ final class ReceiveViewModel: ObservableObject {
     @Published var selectedNames: Set<String> = []
     @Published var loading = false
     @Published var errorMessage: String?
-    @Published var progressText: String?
+    @Published var tracker: TransferTracker?
     @Published var configStatus: SSHConfigStatus = .loading
     @Published var connectionStatus: ConnectionStatus = .idle
 
@@ -123,16 +123,17 @@ final class ReceiveViewModel: ObservableObject {
         let names = entries.filter { selectedNames.contains($0.name) }.map(\.name)
         NSLog("FastSCP[app] performPull alias=%@ path=%@ names=%@ dest=%@",
               selectedAlias, currentPath, names, destURL.path)
-        progressText = "接收中…"
-        defer { progressText = nil }
+        let t = TransferTracker(receiveAlias: selectedAlias, remotePath: currentPath, names: names)
+        self.tracker = t
+        await t.prepare()
+        t.start()
         do {
             try await SSHExecutor.shared.pull(
                 alias: selectedAlias, remotePath: currentPath,
-                names: names, localDest: destURL) { [weak self] p in
-                    Task { @MainActor in
-                        self?.progressText = p.map { "\($0.percent)% \($0.detail)" } ?? "接收中…"
-                    }
+                names: names, localDest: destURL) { p in
+                    Task { @MainActor in t.ingest(p) }
                 }
+            t.complete()
             NSLog("FastSCP[app] performPull SUCCESS")
             RecentStore.sharedReceive().record(
                 .init(alias: selectedAlias, remotePath: currentPath, timestamp: Date()))
@@ -140,8 +141,12 @@ final class ReceiveViewModel: ObservableObject {
             onClose?()
         } catch {
             NSLog("FastSCP[app] performPull FAILED: %@", String(describing: error))
-            errorMessage = SSHErrorMapper.friendlyMessage(for: error)
+            t.fail(SSHErrorMapper.friendlyMessage(for: error))
         }
+    }
+
+    func cancelTransfer() {
+        Task { await SSHExecutor.shared.cancel() }
     }
 }
 
@@ -152,19 +157,20 @@ struct ReceiveView: View {
     var body: some View {
         VStack(spacing: 10) {
             if case .ok = viewModel.configStatus {
-                serverPicker
-                pathField
-                Divider()
-                content
-                statusBar
-                destRow
-                if let err = viewModel.errorMessage {
-                    Text(err).font(.caption).foregroundStyle(.red).lineLimit(4)
-                }
-                Spacer(minLength: 0)
-                footer
-                if let p = viewModel.progressText {
-                    Text(p).font(.caption).monospacedDigit()
+                if let t = viewModel.tracker {
+                    transferBody(t)
+                } else {
+                    serverPicker
+                    pathField
+                    Divider()
+                    content
+                    statusBar
+                    destRow
+                    if let err = viewModel.errorMessage {
+                        Text(err).font(.caption).foregroundStyle(.red).lineLimit(4)
+                    }
+                    Spacer(minLength: 0)
+                    footer
                 }
             } else {
                 configEmptyState
@@ -173,6 +179,28 @@ struct ReceiveView: View {
         .padding(12)
         .frame(width: 360, height: 460)
         .task { await viewModel.loadHosts() }
+    }
+
+    @ViewBuilder
+    private func transferBody(_ t: TransferTracker) -> some View {
+        switch t.progress.phase {
+        case .sending, .preparing:
+            TransferStatusView(tracker: t,
+                               alias: viewModel.selectedAlias,
+                               path: viewModel.currentPath,
+                               onCancel: { viewModel.cancelTransfer() })
+        case .failed(let msg):
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("接收失败").font(.headline)
+                Text(msg)
+                    .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                Button("关闭", role: .cancel) { onClose() }
+            }
+            .padding(.top, 8)
+        case .done:
+            EmptyView()
+        }
     }
 
     @ViewBuilder private var serverPicker: some View {
@@ -260,7 +288,7 @@ struct ReceiveView: View {
                 viewModel.pull()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.selectedAlias.isEmpty || viewModel.selectedCount == 0 || viewModel.progressText != nil)
+            .disabled(viewModel.selectedAlias.isEmpty || viewModel.selectedCount == 0 || viewModel.tracker != nil)
         }
     }
 
