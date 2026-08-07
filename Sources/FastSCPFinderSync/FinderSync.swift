@@ -26,42 +26,25 @@ class FinderSync: FIFinderSync {
 
         let selection = FIFinderSyncController.default().selectedItemURLs() ?? []
         let recents = RecentStore.shared().load()
-        let maxRecent = min(recents.count, FastSCPConfig.maxRecentDestinations)
 
         // ── 发送段（需选中项；源 = 选中文件/文件夹）──
         var addedSend = false
         if !selection.isEmpty {
-            // 一键发送到上次目标（仅当有历史）
+            // (a) 发送到服务器… → 弹目标选择面板（原「手动选择目标…」的功能）
+            let sendItem = NSMenuItem(title: "发送到服务器…",
+                                      action: #selector(chooseDestination(_:)), keyEquivalent: "")
+            sendItem.target = self
+            sendItem.image = Self.menuIcon
+            submenu.addItem(sendItem)
+            // (b) 最近的目标：直接显示最近一次发送到的具体目标 → 一键发送
             if let last = recents.first {
-                let item = NSMenuItem(title: "发送到 \(last.alias):\(last.remotePath)",
+                let item = NSMenuItem(title: "\(last.alias):\(last.remotePath)",
                                       action: #selector(quickSend(_:)), keyEquivalent: "")
                 item.target = self
-                item.image = Self.menuIcon
+                item.image = Self.recentIcon
                 item.representedObject = last
                 submenu.addItem(item)
             }
-            // 最近目标子菜单
-            if maxRecent > 0 {
-                let recentParent = NSMenuItem(title: "最近目标", action: nil, keyEquivalent: "")
-                let recentSub = NSMenu(title: "最近目标")
-                for r in recents.prefix(maxRecent) {
-                    let item = NSMenuItem(title: "\(r.alias):\(r.remotePath)",
-                                          action: #selector(quickSend(_:)), keyEquivalent: "")
-                    item.target = self
-                    item.image = Self.recentIcon
-                    item.representedObject = r
-                    recentSub.addItem(item)
-                }
-                recentParent.submenu = recentSub
-                recentParent.image = Self.recentIcon
-                submenu.addItem(recentParent)
-            }
-            // 手动选择目标
-            let manual = NSMenuItem(title: "手动选择目标…",
-                                    action: #selector(chooseDestination(_:)), keyEquivalent: "")
-            manual.target = self
-            manual.image = Self.menuIcon
-            submenu.addItem(manual)
             addedSend = true
         }
 
