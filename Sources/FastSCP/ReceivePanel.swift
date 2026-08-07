@@ -257,9 +257,7 @@ struct ReceiveView: View {
             Text("接收到 \(viewModel.destURL.path)")
                 .font(.caption).lineLimit(1).truncationMode(.middle)
             Spacer()
-            if viewModel.allowChangeDest {
-                Button("改…") { changeDest() }.buttonStyle(.bordered).controlSize(.small)
-            }
+            Button("改…") { changeDest() }.buttonStyle(.bordered).controlSize(.small)
         }
     }
 

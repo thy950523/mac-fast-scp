@@ -31,10 +31,11 @@ actor SSHExecutor {
         return LsParser.parse(result.stdout).filter(\.isDirectory)
     }
 
-    /// `ssh <alias> ls -ap <path>` → entries (files + directories, unfiltered).
+    /// `ssh <alias> ls -apt <path>` → entries (files + directories, unfiltered),
+    /// sorted by modification time, newest first (`-t`).
     /// 接收面板用它多选要拉取的源条目。
     func listEntries(alias: String, path: String) async throws -> [RemoteEntry] {
-        let result = try await run(exec: "/usr/bin/ssh", args: [alias, "ls", "-ap", path])
+        let result = try await run(exec: "/usr/bin/ssh", args: [alias, "ls", "-apt", path])
         return LsParser.parse(result.stdout)
     }
 
@@ -62,10 +63,34 @@ actor SSHExecutor {
     /// 3. neither works → `.unknown` (transfer still runs, progress is indeterminate)
     func probeRemoteSizes(alias: String, remotePath: String, names: [String]) async -> PreparedTransfer {
         let base = remotePath.hasSuffix("/") ? String(remotePath.dropLast()) : remotePath
-        let paths = names.map { "'\(base)/\($0)'" }
+        let paths = names.map { shellQuoteRemotePath("\(base)/\($0)") }
         if let full = await probeTier1(alias: alias, paths: paths) { return full }
         if let totals = await probeTier2(alias: alias, paths: paths) { return totals }
         return PreparedTransfer(totalBytes: 0, totalFiles: 0, lookup: [:], sizeKnowledge: .unknown)
+    }
+
+    /// Quote a remote path for the remote shell invoked by `ssh <alias> <cmd>`.
+    /// `ssh` joins argv with spaces, so each path must survive shell parsing:
+    /// a leading `~` is converted to a bare `$HOME` (tilde does not expand in
+    /// quotes), the remainder is single-quoted (with `'\''` for apostrophes).
+    /// Absolute paths are simply single-quoted. This preserves spaces and most
+    /// special characters while still expanding `~`.
+    private func shellQuoteRemotePath(_ path: String) -> String {
+        let body: String
+        let prefix: String
+        if path == "~" {
+            return "$HOME"
+        } else if path.hasPrefix("~/") {
+            prefix = "$HOME"
+            body = String(path.dropFirst(1)) // keeps leading "/"
+        } else {
+            prefix = ""
+            body = path
+        }
+        let quoted = body
+            .split(separator: "'", omittingEmptySubsequences: false)
+            .joined(separator: "'\\''")
+        return prefix + "'" + quoted + "'"
     }
 
     private func probeTier1(alias: String, paths: [String]) async -> PreparedTransfer? {
