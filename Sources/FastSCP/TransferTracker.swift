@@ -96,6 +96,17 @@ private enum LocalScanner {
                                       .isSymbolicLinkKey, .fileSizeKey]
         for root in urls {
             let rootURL = root.hasDirectoryPath ? root : root.deletingLastPathComponent()
+            // `FileManager.enumerator(at:)` yields nothing when given a FILE url
+            // (it only enumerates directory contents), so measure a directly-
+            // selected file explicitly.
+            if !root.hasDirectoryPath {
+                if let size = fileSize(root) {
+                    total += size
+                    count += 1
+                    lookup[root.lastPathComponent] = size
+                }
+                continue
+            }
             if let e = fm.enumerator(at: root, includingPropertiesForKeys: keys,
                                      options: [.skipsHiddenFiles]) {
                 for case let url as URL in e {
@@ -116,6 +127,13 @@ private enum LocalScanner {
         }
         return PreparedTransfer(totalBytes: total, totalFiles: count,
                                 lookup: lookup, sizeKnowledge: .full)
+    }
+
+    private static func fileSize(_ url: URL) -> Int64? {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        guard let rv = try? url.resourceValues(forKeys: keys),
+              rv.isRegularFile == true else { return nil }
+        return Int64(rv.fileSize ?? 0)
     }
 
     private static func relativePath(_ url: URL, from root: URL) -> String? {

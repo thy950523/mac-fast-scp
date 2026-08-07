@@ -136,24 +136,40 @@ actor SSHExecutor {
                                  progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
         cancelled = false
         NSLog("FastSCP[ssh] exec=%@ args=%@", exec, args.joined(separator: " "))
+
+        // OpenSSH ≥9 uses the SFTP protocol and writes its progress meter to
+        // STANDARD OUTPUT — but only when stdout is a TTY. A plain Pipe yields
+        // zero progress bytes, so the meter would never move. We wrap the scp
+        // invocation in `script -q /dev/null …`, which allocates a pty for the
+        // child; progress (and any error text) then arrives on our stdout pipe.
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: exec)
-        proc.arguments = args
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        proc.arguments = ["-q", "/dev/null", exec] + args
         let out = Pipe(), err = Pipe()
         proc.standardOutput = out
         proc.standardError = err
+        // `script` misbehaves (exit 1, no pty) when its stdin is a pipe; give it
+        // /dev/null so the child's controlling tty setup succeeds.
+        proc.standardInput = FileHandle(forReadingAtPath: "/dev/null")
 
-        // Drain stdout so scp never blocks on a full pipe.
-        out.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
-        }
+        // Accumulate all output (progress + any remote error text) so we can
+        // surface a meaningful message on failure.
+        let collected = OutputAccumulator()
         let lineScanner = LineScanner { line in
             progress(SCPProgressParser.parse(line))
         }
+        out.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            collected.append(chunk)
+            if let text = String(data: chunk, encoding: .utf8) {
+                lineScanner.feed(text)
+            }
+        }
         err.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard let text = String(data: chunk, encoding: .utf8) else { return }
-            lineScanner.feed(text)
+            guard !chunk.isEmpty else { return }
+            collected.append(chunk)
         }
 
         runningProcess = proc
@@ -163,16 +179,29 @@ actor SSHExecutor {
         err.fileHandleForReading.readabilityHandler = nil
         runningProcess = nil
 
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
-        let stderr = String(data: errData, encoding: .utf8) ?? ""
+        let tail = collected.text
         if cancelled {
             cancelled = false
             throw SSHError.cancelled
         }
         if proc.terminationStatus != 0 {
-            throw SSHError.transferFailed(stderr: stderr)
+            throw SSHError.transferFailed(stderr: tail)
         }
         progress(nil) // signal completion
+    }
+}
+
+/// Thread-safe accumulator of the raw output captured from a child process.
+private final class OutputAccumulator: @unchecked Sendable {
+    private var data = Data()
+    private let lock = NSLock()
+    func append(_ d: Data) { lock.lock(); data.append(d); lock.unlock() }
+    var text: String {
+        lock.lock(); defer { lock.unlock() }
+        return String(data: data, encoding: .utf8)?
+            // `script` may emit a leading EOT (0x04) + backspaces artifact.
+            .trimmingCharacters(in: CharacterSet.controlCharacters)
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }
 
