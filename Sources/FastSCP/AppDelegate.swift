@@ -115,7 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator.receiveRequest = nil
             NSApp.setActivationPolicy(.regular)
             receivePanelController = ReceivePanelController(
-                destURL: req.destURL, allowChangeDest: req.allowChangeDest) { [weak self] in
+                destURL: req.destURL, allowChangeDest: req.allowChangeDest,
+                initialAlias: req.initialAlias, initialPath: req.initialPath) { [weak self] in
                 self?.receivePanelController = nil
                 NSApp.setActivationPolicy(.accessory)
             }

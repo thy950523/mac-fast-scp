@@ -51,12 +51,24 @@ class FinderSync: FIFinderSync {
         // ── 接收段（需当前目录；目标 = 当前 Finder 目录）──
         if let dest = currentDirectory {
             if addedSend { submenu.addItem(.separator()) }
+            // (a) 从服务器接收… → 打开接收面板（从默认位置开始）
             let recv = NSMenuItem(title: "从服务器接收…",
                                   action: #selector(receive(_:)), keyEquivalent: "")
             recv.target = self
             recv.image = Self.receiveIcon
-            recv.representedObject = dest.path
+            recv.representedObject = ["dest": dest.path]
             submenu.addItem(recv)
+            // (b) 最近的目标：最近一次交互的远端位置 → 打开面板并定位到该机器+路径
+            if let last = recents.first {
+                let item = NSMenuItem(title: "\(last.alias):\(last.remotePath)",
+                                      action: #selector(receive(_:)), keyEquivalent: "")
+                item.target = self
+                item.image = Self.recentIcon
+                item.representedObject = ["dest": dest.path,
+                                          "alias": last.alias,
+                                          "path": last.remotePath]
+                submenu.addItem(item)
+            }
         }
 
         // 兜底：既无选中也无当前目录（极少见）
@@ -124,10 +136,14 @@ class FinderSync: FIFinderSync {
     }
 
     @objc func receive(_ sender: NSMenuItem) {
-        guard let destPath = sender.representedObject as? String, !destPath.isEmpty else { return }
-        // No local sources for receive → empty token; the app ignores the
-        // `list` param in the receive branch.
-        openURL(action: "receive", token: "", extra: ["dest": destPath])
+        guard let params = sender.representedObject as? [String: String],
+              let destPath = params["dest"], !destPath.isEmpty else { return }
+        var extra: [String: String] = ["dest": destPath]
+        // 来自「最近的目标」时带上 alias/path，主 App 据此把面板定位到该远端位置
+        if let alias = params["alias"] { extra["alias"] = alias }
+        if let path = params["path"] { extra["path"] = path }
+        // No local sources for receive → empty token; the app ignores `list`.
+        openURL(action: "receive", token: "", extra: extra)
     }
 
     // MARK: - handoff helpers

@@ -28,6 +28,9 @@ final class URLCoordinator: ObservableObject {
         let destURL: URL
         /// Finder 右键发起=false(只读当前目录)；菜单栏发起=true(可「改…」)。
         let allowChangeDest: Bool
+        /// 来自「最近的目标」：打开面板时定位到该机器/路径；nil 则从默认位置开始。
+        let initialAlias: String?
+        let initialPath: String?
     }
 
     func handle(_ url: URL) {
@@ -53,7 +56,9 @@ final class URLCoordinator: ObservableObject {
             guard !destPath.isEmpty else { return }
             receiveRequest = ReceiveRequest(
                 destURL: URL(fileURLWithPath: destPath),
-                allowChangeDest: false)
+                allowChangeDest: false,
+                initialAlias: comps?.queryItems?.first(where: { $0.name == "alias" })?.value,
+                initialPath: comps?.queryItems?.first(where: { $0.name == "path" })?.value)
         default:
             break
         }

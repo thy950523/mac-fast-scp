@@ -18,11 +18,16 @@ final class ReceiveViewModel: ObservableObject {
     /// 本地目标目录。`var` 以便菜单栏发起时通过「改…」更换。
     @Published var destURL: URL
     let allowChangeDest: Bool
+    /// 来自「最近的目标」：打开面板时定位到该机器/路径；nil 则从默认位置开始。
+    private let initialAlias: String?
+    private let initialPath: String?
     var onClose: (() -> Void)?
 
-    init(destURL: URL, allowChangeDest: Bool) {
+    init(destURL: URL, allowChangeDest: Bool, initialAlias: String? = nil, initialPath: String? = nil) {
         self.destURL = destURL
         self.allowChangeDest = allowChangeDest
+        self.initialAlias = initialAlias
+        self.initialPath = initialPath
     }
 
     var selectedCount: Int { selectedNames.count }
@@ -51,8 +56,13 @@ final class ReceiveViewModel: ObservableObject {
         }
         hosts = parsed
         configStatus = .ok(hostCount: parsed.count)
-        // 轻量默认：停在发送侧最近用过的那台机器（不构成「最近来源」UI）。
-        selectedAlias = RecentStore.shared().load().first?.alias ?? parsed.first?.alias ?? ""
+        // 定位：来自「最近的目标」则用其 alias/path，否则默认到上次用过的机器 + ~
+        if let initialAlias, parsed.contains(where: { $0.alias == initialAlias }) {
+            selectedAlias = initialAlias
+        } else {
+            selectedAlias = RecentStore.shared().load().first?.alias ?? parsed.first?.alias ?? ""
+        }
+        currentPath = initialPath ?? "~"
         await refresh()
     }
 
@@ -283,9 +293,9 @@ final class ReceivePanelController {
     private var panel: NSPanel?
     private let onClose: () -> Void
 
-    init(destURL: URL, allowChangeDest: Bool, onClose: @escaping () -> Void) {
+    init(destURL: URL, allowChangeDest: Bool, initialAlias: String? = nil, initialPath: String? = nil, onClose: @escaping () -> Void) {
         self.onClose = onClose
-        let viewModel = ReceiveViewModel(destURL: destURL, allowChangeDest: allowChangeDest)
+        let viewModel = ReceiveViewModel(destURL: destURL, allowChangeDest: allowChangeDest, initialAlias: initialAlias, initialPath: initialPath)
         let host = NSHostingController(
             rootView: ReceiveView(viewModel: viewModel) { [weak self] in
                 self?.panel?.close()

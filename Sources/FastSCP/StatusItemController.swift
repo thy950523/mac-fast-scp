@@ -75,7 +75,7 @@ final class StatusItemController: NSObject {
         let dest = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Downloads")
         coordinator.receiveRequest = URLCoordinator.ReceiveRequest(
-            destURL: dest, allowChangeDest: true)
+            destURL: dest, allowChangeDest: true, initialAlias: nil, initialPath: nil)
         NotificationCenter.default.post(name: .fastSCPShowReceivePanel, object: nil)
     }
 
