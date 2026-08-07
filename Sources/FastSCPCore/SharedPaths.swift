@@ -21,6 +21,9 @@ public enum SharedPaths {
         }
     }
 
+    /// 发送（本地 → 远端）的最近服务器。
     public static var recentURL: URL { sharedDir.appendingPathComponent("recent.json") }
+    /// 接收（远端 → 本地）的最近服务器，与发送独立统计。
+    public static var recentReceiveURL: URL { sharedDir.appendingPathComponent("recent-receive.json") }
     public static func batchURL(token: String) -> URL { sharedDir.appendingPathComponent("batch-\(token).txt") }
 }

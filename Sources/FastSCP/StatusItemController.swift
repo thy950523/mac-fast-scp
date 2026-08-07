@@ -5,6 +5,7 @@ import FastSCPCore
 extension Notification.Name {
     static let fastSCPShowAbout = Notification.Name("fastSCPShowAbout")
     static let fastSCPShowPanel = Notification.Name("fastSCPShowPanel")
+    static let fastSCPShowReceivePanel = Notification.Name("fastSCPShowReceivePanel")
 }
 
 @MainActor
@@ -32,7 +33,19 @@ final class StatusItemController: NSObject {
         send.target = self
         menu.addItem(send)
 
+        let receive = NSMenuItem(title: "从服务器接收…",
+                                 action: #selector(receiveFromServer),
+                                 keyEquivalent: "")
+        receive.target = self
+        menu.addItem(receive)
+
         menu.addItem(.separator())
+
+        let testNotify = NSMenuItem(title: "发送测试通知",
+                                    action: #selector(sendTestNotification),
+                                    keyEquivalent: "")
+        testNotify.target = self
+        menu.addItem(testNotify)
 
         let about = NSMenuItem(title: "关于 FastSCP",
                                action: #selector(showAbout),
@@ -62,6 +75,19 @@ final class StatusItemController: NSObject {
             coordinator.panelRequest = URLCoordinator.PanelRequest(selections: panel.urls)
             NotificationCenter.default.post(name: .fastSCPShowPanel, object: nil)
         }
+    }
+
+    @objc private func receiveFromServer() {
+        let dest = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Downloads")
+        coordinator.receiveRequest = URLCoordinator.ReceiveRequest(
+            destURL: dest, allowChangeDest: true, initialAlias: nil, initialPath: nil)
+        NotificationCenter.default.post(name: .fastSCPShowReceivePanel, object: nil)
+    }
+
+    @objc private func sendTestNotification() {
+        Notifier.logSettings()
+        Notifier.send(title: "FastSCP", body: "这是一条测试通知")
     }
 
     @objc private func showAbout() {

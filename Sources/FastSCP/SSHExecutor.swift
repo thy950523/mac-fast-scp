@@ -27,6 +27,13 @@ actor SSHExecutor {
         return LsParser.parse(result.stdout).filter(\.isDirectory)
     }
 
+    /// `ssh <alias> ls -ap <path>` → entries (files + directories, unfiltered).
+    /// 接收面板用它多选要拉取的源条目。
+    func listEntries(alias: String, path: String) async throws -> [RemoteEntry] {
+        let result = try await run(exec: "/usr/bin/ssh", args: [alias, "ls", "-ap", path])
+        return LsParser.parse(result.stdout)
+    }
+
     /// `scp -r <sources> <alias>:<path>`; `progress` receives parsed updates.
     func transfer(alias: String, path: String, sources: [URL],
                   progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
@@ -34,6 +41,14 @@ actor SSHExecutor {
         args.append(contentsOf: sources.map(\.path))
         let safePath = path.hasSuffix("/") ? path : path + "/"
         args.append("\(alias):\(safePath)")
+        try await runWithProgress(exec: "/usr/bin/scp", args: args, progress: progress)
+    }
+
+    /// `scp -r <alias>:<remotePath>/<name> ... <localDest>/`；argv 由 `SCPCommandBuilder` 构造。
+    func pull(alias: String, remotePath: String, names: [String],
+              localDest: URL, progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
+        let args = SCPCommandBuilder.pullArgs(
+            alias: alias, remotePath: remotePath, names: names, localDest: localDest)
         try await runWithProgress(exec: "/usr/bin/scp", args: args, progress: progress)
     }
 
@@ -68,6 +83,7 @@ actor SSHExecutor {
 
     private func runWithProgress(exec: String, args: [String],
                                  progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
+        NSLog("FastSCP[ssh] exec=%@ args=%@", exec, args.joined(separator: " "))
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exec)
         proc.arguments = args

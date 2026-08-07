@@ -14,14 +14,21 @@ public final class RecentStore: @unchecked Sendable {
     /// Resolve the store path for the current process context via `SharedPaths`.
     public static var defaultURL: URL { SharedPaths.recentURL }
 
+    /// 发送方向（本地 → 远端）的最近服务器。
     public static func shared() -> RecentStore {
-        RecentStore(fileURL: defaultURL)
+        RecentStore(fileURL: SharedPaths.recentURL)
+    }
+
+    /// 接收方向（远端 → 本地）的最近服务器，与发送完全独立。
+    public static func sharedReceive() -> RecentStore {
+        RecentStore(fileURL: SharedPaths.recentReceiveURL)
     }
 
     public func load() -> [RecentDestination] {
         lock.lock(); defer { lock.unlock() }
         guard let data = try? Data(contentsOf: fileURL) else { return [] }
-        return (try? JSONDecoder().decode([RecentDestination].self, from: data)) ?? []
+        let decoded = (try? JSONDecoder().decode([RecentDestination].self, from: data)) ?? []
+        return RecentDestinations.normalize(decoded)
     }
 
     public func save(_ destinations: [RecentDestination]) {
