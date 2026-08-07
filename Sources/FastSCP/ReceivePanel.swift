@@ -60,7 +60,7 @@ final class ReceiveViewModel: ObservableObject {
         if let initialAlias, parsed.contains(where: { $0.alias == initialAlias }) {
             selectedAlias = initialAlias
         } else {
-            selectedAlias = RecentStore.shared().load().first?.alias ?? parsed.first?.alias ?? ""
+            selectedAlias = RecentStore.sharedReceive().load().first?.alias ?? parsed.first?.alias ?? ""
         }
         currentPath = initialPath ?? "~"
         await refresh()
@@ -121,6 +121,8 @@ final class ReceiveViewModel: ObservableObject {
 
     func performPull() async {
         let names = entries.filter { selectedNames.contains($0.name) }.map(\.name)
+        NSLog("FastSCP[app] performPull alias=%@ path=%@ names=%@ dest=%@",
+              selectedAlias, currentPath, names, destURL.path)
         progressText = "接收中…"
         defer { progressText = nil }
         do {
@@ -131,9 +133,13 @@ final class ReceiveViewModel: ObservableObject {
                         self?.progressText = p.map { "\($0.percent)% \($0.detail)" } ?? "接收中…"
                     }
                 }
+            NSLog("FastSCP[app] performPull SUCCESS")
+            RecentStore.sharedReceive().record(
+                .init(alias: selectedAlias, remotePath: currentPath, timestamp: Date()))
             Notifier.send(title: "FastSCP", body: "已接收 \(names.count) 项到 \(destURL.path)")
             onClose?()
         } catch {
+            NSLog("FastSCP[app] performPull FAILED: %@", String(describing: error))
             errorMessage = SSHErrorMapper.friendlyMessage(for: error)
         }
     }
