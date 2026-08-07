@@ -138,14 +138,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runQuick(_ req: URLCoordinator.QuickRequest) {
         Task { @MainActor in
+            let tracker = TransferTracker(sendSelections: req.selections)
+            let hud = QuickTransferHUDController(tracker: tracker,
+                                                 alias: req.alias,
+                                                 path: req.remotePath)
+            hud.show()
+            await tracker.prepare()
+            tracker.start()
             do {
                 try await SSHExecutor.shared.transfer(
                     alias: req.alias, path: req.remotePath, sources: req.selections
-                ) { _ in }
-                RecentStore.shared().record(.init(alias: req.alias, remotePath: req.remotePath, timestamp: Date()))
-                Notifier.send(title: "FastSCP", body: "已发送 \(req.selections.count) 项到 \(req.alias):\(req.remotePath)")
+                ) { p in
+                    Task { @MainActor in tracker.ingest(p) }
+                }
+                tracker.complete()
+                RecentStore.shared().record(.init(alias: req.alias,
+                                                  remotePath: req.remotePath,
+                                                  timestamp: Date()))
+                // HUD auto-closes ~1.2s after success; no system notification.
             } catch {
-                Notifier.send(title: "FastSCP 传输失败", body: SSHErrorMapper.friendlyMessage(for: error))
+                tracker.fail(SSHErrorMapper.friendlyMessage(for: error))
+                // HUD stays until the user closes it.
             }
         }
     }
