@@ -8,6 +8,10 @@ import FastSCPCore
 /// Single-instance: there is only one quick-send at a time.
 @MainActor
 final class QuickTransferHUDController {
+    /// Live HUDs keep themselves alive (the caller's Task may finish before the
+    /// auto-fade completes). Released in `dismiss()`.
+    private static var active: [ObjectIdentifier: QuickTransferHUDController] = [:]
+
     private var window: NSPanel?
     private let tracker: TransferTracker
     private let alias: String
@@ -45,6 +49,7 @@ final class QuickTransferHUDController {
         }
 
         self.window = panel
+        Self.active[ObjectIdentifier(self)] = self
         panel.orderFrontRegardless()
         observe()
     }
@@ -79,6 +84,7 @@ final class QuickTransferHUDController {
     func dismiss() {
         window?.orderOut(nil)
         window = nil
+        Self.active.removeValue(forKey: ObjectIdentifier(self))
     }
 }
 
