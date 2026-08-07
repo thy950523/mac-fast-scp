@@ -41,6 +41,12 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        let testNotify = NSMenuItem(title: "发送测试通知",
+                                    action: #selector(sendTestNotification),
+                                    keyEquivalent: "")
+        testNotify.target = self
+        menu.addItem(testNotify)
+
         let about = NSMenuItem(title: "关于 FastSCP",
                                action: #selector(showAbout),
                                keyEquivalent: "")
@@ -77,6 +83,11 @@ final class StatusItemController: NSObject {
         coordinator.receiveRequest = URLCoordinator.ReceiveRequest(
             destURL: dest, allowChangeDest: true, initialAlias: nil, initialPath: nil)
         NotificationCenter.default.post(name: .fastSCPShowReceivePanel, object: nil)
+    }
+
+    @objc private func sendTestNotification() {
+        Notifier.logSettings()
+        Notifier.send(title: "FastSCP", body: "这是一条测试通知")
     }
 
     @objc private func showAbout() {
