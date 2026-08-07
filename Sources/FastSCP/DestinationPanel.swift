@@ -25,7 +25,7 @@ final class DestinationViewModel: ObservableObject {
     @Published var entries: [RemoteEntry] = []
     @Published var loading = false
     @Published var errorMessage: String?
-    @Published var progressText: String?
+    @Published var tracker: TransferTracker?
     @Published var configStatus: SSHConfigStatus = .loading
     @Published var connectionStatus: ConnectionStatus = .idle
 
@@ -129,20 +129,25 @@ final class DestinationViewModel: ObservableObject {
     }
 
     func performTransfer(alias: String, path: String) async {
-        progressText = "传输中…"
-        defer { progressText = nil }
+        let t = TransferTracker(sendSelections: selections)
+        self.tracker = t
+        await t.prepare()
+        t.start()
         do {
-            try await SSHExecutor.shared.transfer(alias: alias, path: path, sources: selections) { [weak self] p in
-                Task { @MainActor in
-                    self?.progressText = p.map { "\($0.percent)% \($0.detail)" } ?? "传输中…"
-                }
+            try await SSHExecutor.shared.transfer(alias: alias, path: path, sources: selections) { p in
+                Task { @MainActor in t.ingest(p) }
             }
+            t.complete()
             RecentStore.shared().record(.init(alias: alias, remotePath: path, timestamp: Date()))
             Notifier.send(title: "FastSCP", body: "已发送 \(selections.count) 项到 \(alias):\(path)")
             onClose?()
         } catch {
-            errorMessage = SSHErrorMapper.friendlyMessage(for: error)
+            t.fail(SSHErrorMapper.friendlyMessage(for: error))
         }
+    }
+
+    func cancelTransfer() {
+        Task { await SSHExecutor.shared.cancel() }
     }
 }
 
@@ -153,18 +158,19 @@ struct DestinationView: View {
     var body: some View {
         VStack(spacing: 10) {
             if case .ok = viewModel.configStatus {
-                serverPicker
-                pathField
-                Divider()
-                content
-                statusBar
-                if let err = viewModel.errorMessage {
-                    Text(err).font(.caption).foregroundStyle(.red).lineLimit(4)
-                }
-                Spacer(minLength: 0)
-                footer
-                if let p = viewModel.progressText {
-                    Text(p).font(.caption).monospacedDigit()
+                if let t = viewModel.tracker {
+                    transferBody(t)
+                } else {
+                    serverPicker
+                    pathField
+                    Divider()
+                    content
+                    statusBar
+                    if let err = viewModel.errorMessage {
+                        Text(err).font(.caption).foregroundStyle(.red).lineLimit(4)
+                    }
+                    Spacer(minLength: 0)
+                    footer
                 }
             } else {
                 configEmptyState
@@ -173,6 +179,28 @@ struct DestinationView: View {
         .padding(12)
         .frame(width: 360, height: 440)
         .task { await viewModel.loadHosts() }
+    }
+
+    @ViewBuilder
+    private func transferBody(_ t: TransferTracker) -> some View {
+        switch t.progress.phase {
+        case .sending, .preparing:
+            TransferStatusView(tracker: t,
+                               alias: viewModel.selectedAlias,
+                               path: viewModel.currentPath,
+                               onCancel: { viewModel.cancelTransfer() })
+        case .failed(let msg):
+            VStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text("传输失败").font(.headline)
+                Text(msg)
+                    .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                Button("关闭", role: .cancel) { onClose() }
+            }
+            .padding(.top, 8)
+        case .done:
+            EmptyView()
+        }
     }
 
     @ViewBuilder private var serverPicker: some View {
@@ -292,7 +320,7 @@ struct DestinationView: View {
                 viewModel.send()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.selectedAlias.isEmpty || viewModel.progressText != nil)
+            .disabled(viewModel.selectedAlias.isEmpty || viewModel.tracker != nil)
         }
     }
 }
