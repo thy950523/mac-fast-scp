@@ -70,4 +70,38 @@ final class SCPProgressParserTests: XCTestCase {
         XCTAssertEqual(p?.percent, 100)
         XCTAssertEqual(p?.fileName, "README.md")
     }
+
+    // MARK: - Real captured scp (OpenSSH ≥9, SFTP mode) progress lines.
+    // These are byte-for-byte the lines `script -q /dev/null scp` emits, captured
+    // against a live transfer. They guard against the parser silently returning
+    // nil/0 for the real format (which would freeze the bar at 0%).
+
+    func testRealScpZeroProgressLine() {
+        let p = SCPProgressParser.parse("probe-big.bin 0% 0 0.0KB/s --:-- ETA")
+        XCTAssertEqual(p?.percent, 0)
+        XCTAssertEqual(p?.fileTransferredBytes, 0)
+        XCTAssertEqual(p?.fileName, "probe-big.bin")
+    }
+
+    func testRealScpEarlyProgressLine() {
+        let p = SCPProgressParser.parse("probe-big.bin 3% 255KB 253.7KB/s 00:29 ETA")
+        XCTAssertEqual(p?.percent, 3)
+        XCTAssertEqual(p?.fileName, "probe-big.bin")
+        XCTAssertEqual(p?.fileTransferredBytes, 255 * 1024)
+        XCTAssertGreaterThan(p?.rateBytesPerSec ?? 0, 200_000)
+    }
+
+    func testRealScpHighProgressLine() {
+        let p = SCPProgressParser.parse("probe-big.bin 78% 6120KB 672.2KB/s 00:02 ETA")
+        XCTAssertEqual(p?.percent, 78)
+        XCTAssertEqual(p?.fileTransferredBytes, 6120 * 1024)
+    }
+
+    func testRealScpStalledLineStillParses() {
+        // scp prints "- stalled -" instead of an ETA when the link stalls; the
+        // transferred-bytes token before it must still parse.
+        let p = SCPProgressParser.parse("probe-big.bin 3% 255KB 134.8KB/s - stalled -")
+        XCTAssertEqual(p?.percent, 3)
+        XCTAssertEqual(p?.fileTransferredBytes, 255 * 1024)
+    }
 }

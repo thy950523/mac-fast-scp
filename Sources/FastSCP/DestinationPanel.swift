@@ -129,6 +129,16 @@ final class DestinationViewModel: ObservableObject {
     }
 
     func performTransfer(alias: String, path: String) async {
+        // Resolve remote overwrite collisions before starting the transfer.
+        switch await SendOverwrite.resolve(alias: alias, path: path, sources: selections) {
+        case .cancelled:
+            return
+        case .failed(let msg):
+            errorMessage = msg
+            return
+        case .proceed:
+            break
+        }
         let t = TransferTracker(sendSelections: selections)
         self.tracker = t
         await t.prepare()
@@ -159,7 +169,11 @@ struct DestinationView: View {
         VStack(spacing: 10) {
             if case .ok = viewModel.configStatus {
                 if let t = viewModel.tracker {
-                    transferBody(t)
+                    TransferPhaseView(tracker: t,
+                                      alias: viewModel.selectedAlias,
+                                      path: viewModel.currentPath,
+                                      onCancel: { viewModel.cancelTransfer() },
+                                      onClose: { onClose() })
                 } else {
                     serverPicker
                     pathField
@@ -179,32 +193,6 @@ struct DestinationView: View {
         .padding(12)
         .frame(width: 360, height: 440)
         .task { await viewModel.loadHosts() }
-    }
-
-    @ViewBuilder
-    private func transferBody(_ t: TransferTracker) -> some View {
-        switch t.progress.phase {
-        case .sending, .preparing:
-            TransferStatusView(tracker: t,
-                               alias: viewModel.selectedAlias,
-                               path: viewModel.currentPath,
-                               onCancel: { viewModel.cancelTransfer() })
-        case .failed(let msg):
-            let cancelled = msg == "已取消"
-            VStack(spacing: 8) {
-                Image(systemName: cancelled ? "xmark.circle" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(cancelled ? Color.secondary : .orange)
-                Text(cancelled ? "已取消传输" : "传输失败").font(.headline)
-                if !cancelled {
-                    Text(msg)
-                        .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
-                }
-                Button("关闭", role: .cancel) { onClose() }
-            }
-            .padding(.top, 8)
-        case .done:
-            EmptyView()
-        }
     }
 
     @ViewBuilder private var serverPicker: some View {
@@ -325,6 +313,42 @@ struct DestinationView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(viewModel.selectedAlias.isEmpty || viewModel.tracker != nil)
+        }
+    }
+}
+
+/// Transfer UI that OBSERVES the tracker, so a phase change re-renders at once.
+/// Previously this switch lived inside `DestinationView`, which held the tracker
+/// as a plain `let` — SwiftUI never re-rendered it on phase change, so after
+/// cancelling (phase → .failed) the panel stayed on "传输中" with a cancel
+/// button that no longer did anything. Hoisting it into an `@ObservedObject`
+/// sub-view fixes that, and keeps live progress updating in the bargain.
+private struct TransferPhaseView: View {
+    @ObservedObject var tracker: TransferTracker
+    let alias: String
+    let path: String
+    let onCancel: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        switch tracker.progress.phase {
+        case .sending, .preparing:
+            TransferStatusView(tracker: tracker, alias: alias, path: path, onCancel: onCancel)
+        case .failed(let msg):
+            let cancelled = msg == "已取消"
+            VStack(spacing: 8) {
+                Image(systemName: cancelled ? "xmark.circle" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(cancelled ? Color.secondary : .orange)
+                Text(cancelled ? "已取消传输" : "传输失败").font(.headline)
+                if !cancelled {
+                    Text(msg)
+                        .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                }
+                Button("关闭", role: .cancel) { onClose() }
+            }
+            .padding(.top, 8)
+        case .done:
+            EmptyView()
         }
     }
 }

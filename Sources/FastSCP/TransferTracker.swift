@@ -11,6 +11,8 @@ final class TransferTracker: ObservableObject {
     private let remote: (alias: String, path: String, names: [String])?
     private var aggregator: TransferAggregator
     private var prepared = false
+    /// Last shown percent we logged, to sample ingest diagnostics.
+    private var lastLoggedPct = -2
 
     /// Send initializer: total size comes from a local scan.
     init(sendSelections selections: [URL]) {
@@ -35,13 +37,21 @@ final class TransferTracker: ObservableObject {
     func prepare() async {
         guard !prepared else { return }
         prepared = true
+
         let prep: PreparedTransfer
         switch direction {
         case .send:
             let sels = selections
-            prep = await Task.detached(priority: .userInitiated) {
-                LocalScanner.scan(urls: sels)
+            DiagLog.log("[tracker] prepare send sources=\(sels.map(\.path))")
+            let scanned = await Task.detached(priority: .userInitiated) { () -> (PreparedTransfer, [String]) in
+                // One-shot readability probe for diagnostics only (never blocks).
+                // If these are non-empty, the app can't read its own sources — a
+                // macOS TCC situation we want to see in the log.
+                let unreadable = sels.filter { !LocalScanner.isReadable($0) }.map(\.path)
+                return (LocalScanner.scan(urls: sels), unreadable)
             }.value
+            prep = scanned.0
+            DiagLog.log("[tracker] prepare send result bytes=\(prep.totalBytes) files=\(prep.totalFiles) knowledge=\(prep.sizeKnowledge) unreadable=\(scanned.1)")
         case .receive:
             guard let r = remote else {
                 prep = PreparedTransfer(totalBytes: 0, totalFiles: 0, sizeKnowledge: .unknown)
@@ -72,6 +82,14 @@ final class TransferTracker: ObservableObject {
                                          fileName: p.fileName,
                                          rateBytesPerSec: p.rateBytesPerSec))
         progress = aggregator.progress
+        // Sample by whole-percent change so a transfer logs a handful of lines,
+        // not hundreds. Localizes whether progress events reach the tracker and
+        // what percent they compute to.
+        let shown = Int(progress.percent * 100)
+        if shown != lastLoggedPct {
+            lastLoggedPct = shown
+            DiagLog.log("[tracker] ingest scp=\(p.percent)% xfbytes=\(p.fileTransferredBytes.map(String.init) ?? "nil") name=\(p.fileName ?? "nil") -> completed=\(progress.completedBytes)/\(progress.totalBytes) shown=\(shown)%")
+        }
     }
 
     func complete() {
@@ -121,5 +139,22 @@ private enum LocalScanner {
         guard let rv = try? url.resourceValues(forKeys: keys),
               rv.isRegularFile == true else { return nil }
         return Int64(rv.fileSize ?? 0)
+    }
+
+    /// True if the URL can actually be read right now (open+read for files,
+    /// list for directories). POSIX `access()` can report OK while macOS TCC
+    /// still blocks the real read, so this performs a real probe. Diagnostics
+    /// only — it never blocks or waits for a permission dialog.
+    static func isReadable(_ url: URL) -> Bool {
+        let path = url.path
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir) else { return false }
+        if isDir.boolValue {
+            return (try? FileManager.default.contentsOfDirectory(atPath: path)) != nil
+        }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        let peek = try? handle.read(upToCount: 1)
+        try? handle.close()
+        return peek != nil
     }
 }

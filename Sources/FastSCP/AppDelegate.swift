@@ -138,6 +138,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func runQuick(_ req: URLCoordinator.QuickRequest) {
         Task { @MainActor in
+            // Resolve remote overwrite collisions before starting any UI/transfer.
+            // For a read-only existing remote file this is what lets the send
+            // actually succeed instead of failing with "Permission denied".
+            switch await SendOverwrite.resolve(alias: req.alias, path: req.remotePath, sources: req.selections) {
+            case .cancelled:
+                return
+            case .failed(let msg):
+                let tracker = TransferTracker(sendSelections: req.selections)
+                let hud = QuickTransferHUDController(tracker: tracker, alias: req.alias, path: req.remotePath)
+                hud.show()
+                tracker.fail(msg)
+                return
+            case .proceed:
+                break
+            }
+
             let tracker = TransferTracker(sendSelections: req.selections)
             let hud = QuickTransferHUDController(tracker: tracker,
                                                  alias: req.alias,

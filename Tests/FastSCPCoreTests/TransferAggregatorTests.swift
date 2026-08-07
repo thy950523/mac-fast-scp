@@ -113,4 +113,37 @@ final class TransferAggregatorTests: XCTestCase {
         XCTAssertEqual(a.progress.completedBytes, before)
         if case .failed(let m) = a.progress.phase { XCTAssertEqual(m, "kaboom") } else { XCTFail() }
     }
+
+    /// End-to-end (parser→aggregator) with the real captured scp sequence for a
+    /// single 8 MB file. Guards the whole "percent stays 0%" path: if the parser
+    /// ever stops extracting transferredBytes, or the aggregator stops crediting
+    /// them, the percent assertions fail.
+    func testRealSingleFileSequenceComputesPercent() {
+        var a = TransferAggregator(direction: .send, totalBytes: 8_000_000, totalFiles: 1)
+        a.startSending()
+
+        func line(_ s: String) -> ParsedProgress {
+            let p = SCPProgressParser.parse(s)!
+            return .init(percent: Double(p.percent) / 100.0,
+                         transferredBytes: p.fileTransferredBytes,
+                         fileName: p.fileName, rateBytesPerSec: p.rateBytesPerSec)
+        }
+
+        a.ingest(line("probe-big.bin 0% 0 0.0KB/s --:-- ETA"))
+        XCTAssertEqual(Int(a.progress.percent * 100), 0)
+
+        a.ingest(line("probe-big.bin 3% 255KB 253.7KB/s 00:29 ETA"))
+        XCTAssertEqual(a.progress.completedBytes, 255 * 1024)
+        XCTAssertEqual(Int(a.progress.percent * 100), 3)
+
+        a.ingest(line("probe-big.bin 3% 255KB 134.8KB/s - stalled -"))
+        XCTAssertEqual(a.progress.completedBytes, 255 * 1024) // no regression while stalled
+
+        a.ingest(line("probe-big.bin 78% 6120KB 672.2KB/s 00:02 ETA"))
+        XCTAssertEqual(a.progress.completedBytes, 6120 * 1024)
+        XCTAssertEqual(Int(a.progress.percent * 100), 78)
+
+        a.complete()
+        XCTAssertEqual(a.progress.percent, 1.0)
+    }
 }
