@@ -268,10 +268,16 @@ actor SSHExecutor {
         if pid == 0 {
             // ── child: become scp (only async-signal-safe calls until exec) ──
             _ = close(masterFd)          // child uses the pty slave (0/1/2), not the master
+            // Set child as leader of its own process group so scp's
+            // getpgrp() == tcgetpgrp() check passes (foreground terminal).
+            _ = setpgid(0, 0)
             _ = execvp(exec, &cArgs)
             _exit(127)                   // only reached if exec fails
         }
         // ── parent ──
+        // Also setpgid in the parent to avoid race condition where the child
+        // execs before we set it here.
+        _ = setpgid(pid, pid)
         cArgs.forEach { if let p = $0 { free(p) } }
 
         let collected = OutputAccumulator()
