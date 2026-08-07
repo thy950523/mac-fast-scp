@@ -14,6 +14,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Notifier.requestAuthorization()
 
+        // 每次启动清掉指向其他路径（旧构建 / 已删除副本）的注册：PluginKit 里的
+        // 僵尸扩展条目，以及 LaunchServices 里残留的 FastSCP.app 路径。两者都会让
+        // 「设置 > 登录项与扩展」出现多行同名 FastSCP。
+        // lsregister -dump 很慢，放后台线程，别卡住启动。
+        DispatchQueue.global(qos: .utility).async {
+            let pruned = ExtensionChecker.pruneStaleRegistrations()
+            if !pruned.isEmpty {
+                DiagLog.log("[app] startup pruned \(pruned.count) stale registration(s)")
+            }
+        }
+
         // Start as menu-bar agent; Dock icon only appears while a window is open.
         NSApp.setActivationPolicy(.accessory)
 
@@ -113,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let req = coordinator.receiveRequest {
             coordinator.receiveRequest = nil
+            DiagLog.log("[app] react(): showing receive panel dest=\(req.destURL.path) changeDest=\(req.allowChangeDest)")
             NSApp.setActivationPolicy(.regular)
             receivePanelController = ReceivePanelController(
                 destURL: req.destURL, allowChangeDest: req.allowChangeDest,
