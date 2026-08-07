@@ -38,6 +38,7 @@ final class URLCoordinator: ObservableObject {
         let action = url.host ?? ""
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let token = comps?.queryItems?.first(where: { $0.name == "list" })?.value ?? ""
+        DiagLog.log("[app] URLCoordinator.handle action=\(action) url=\(url.absoluteString)")
 
         switch action {
         case "choose":

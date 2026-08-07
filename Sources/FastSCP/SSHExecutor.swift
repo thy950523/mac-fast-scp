@@ -83,6 +83,7 @@ actor SSHExecutor {
 
     private func runWithProgress(exec: String, args: [String],
                                  progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
+        NSLog("FastSCP[ssh] exec=%@ args=%@", exec, args.joined(separator: " "))
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exec)
         proc.arguments = args
