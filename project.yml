@@ -9,6 +9,15 @@ settings:
     SWIFT_VERSION: "6.0"
     CODE_SIGN_STYLE: Automatic
     ENABLE_HARDENED_RUNTIME: YES
+schemes:
+  FastSCPCore:
+    build:
+      targets:
+        FastSCPCore: [test, run, profile, analyze, archive]
+    test:
+      targets:
+        - FastSCPCoreTests
+      gatherCoverageData: false
 targets:
   FastSCPCore:
     type: framework
