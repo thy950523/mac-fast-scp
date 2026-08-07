@@ -19,16 +19,21 @@ public enum SCPProgressParser {
     /// "\r<name><spaces>NNN%<size> <rate> <eta>".
     /// Returns nil if the line carries no percent at all.
     public static func parse(_ line: String) -> SCPProgress? {
-        let stripped = line.hasPrefix("\r") ? String(line.dropFirst()) : line
-        guard let r = stripped.range(of: #"\b\d{1,3}%"#, options: .regularExpression) else {
+        // Strip a leading CR and any control chars (e.g. the EOT/backspace
+        // artifact that `script` emits before the first progress line).
+        let stripped = line
+            .drop(while: { $0 == "\r" || $0.isNewline })
+            .trimmingPrefix { $0.unicodeScalars.allSatisfy { CharacterSet.controlCharacters.contains($0) } }
+        let s = String(stripped)
+        guard let r = s.range(of: #"\b\d{1,3}%"#, options: .regularExpression) else {
             return nil
         }
-        let numberText = String(stripped[r].dropLast())
+        let numberText = String(s[r].dropLast())
         guard let pct = Int(numberText), (0...100).contains(pct) else { return nil }
 
-        let fileName = String(stripped[..<r.lowerBound])
+        let fileName = String(s[..<r.lowerBound])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let detail = String(stripped[r.upperBound...])
+        let detail = String(s[r.upperBound...])
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return SCPProgress(

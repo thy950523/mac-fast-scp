@@ -46,4 +46,12 @@ final class SCPProgressParserTests: XCTestCase {
         XCTAssertNil(p?.fileName)
         XCTAssertNil(p?.rateBytesPerSec)
     }
+
+    func testStripsScriptEOTPrefix() {
+        // `script -q` emits EOT (0x04) + two backspaces before the first line.
+        let line = "\u{04}\u{08}\u{08}\rREADME.md  100%  12KB 123.4KB/s 0:00"
+        let p = SCPProgressParser.parse(line)
+        XCTAssertEqual(p?.percent, 100)
+        XCTAssertEqual(p?.fileName, "README.md")
+    }
 }
