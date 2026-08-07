@@ -26,13 +26,13 @@ final class RemoteSizeProbeTests: XCTestCase {
         XCTAssertEqual(RemoteSizeProbe.parseDuTotalKB("12345\t/var/www"), 12345)
     }
 
-    func testParseDuTotalMultiPathBSD() {
-        let out = "100\t/a\n200\t/b\n300\ttotal\n"
+    func testParseDuTotalSumsMultiplePaths() {
+        // Called without -c: one line per path on both GNU and BSD du.
+        let out = "100\t/a\n200\t/b\n"
         XCTAssertEqual(RemoteSizeProbe.parseDuTotalKB(out), 300)
     }
 
-    func testParseDuTotalGNU() {
-        let out = "100\t/a\n200\t/b\n300\ttotal\n"
-        XCTAssertEqual(RemoteSizeProbe.parseDuTotalKB(out), 300)
+    func testParseDuTotalIgnoresNonNumeric() {
+        XCTAssertEqual(RemoteSizeProbe.parseDuTotalKB("100\t/a\ndu: cannot read '/b'\n"), 100)
     }
 }

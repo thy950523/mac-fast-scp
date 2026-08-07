@@ -39,17 +39,19 @@ public enum RemoteSizeProbe {
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
     }
 
-    /// Parses `du -sk` total in KB. For multiple paths, takes the last numeric
-    /// line (the "total" summary both GNU `-c` and BSD print).
+    /// Sums the KB columns of `du -sk` output. Called without `-c`, so both
+    /// GNU and BSD `du` print one line per selected path (no total line);
+    /// summing them yields the correct grand total on both platforms.
     public static func parseDuTotalKB(_ output: String) -> Int64? {
-        var last: Int64?
+        var sum: Int64 = 0
+        var found = false
         for raw in output.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
             let first = line.split(separator: "\t").first
                 ?? line.split(separator: " ").first
-            if let s = first, let kb = Int64(s) { last = kb }
+            if let s = first, let kb = Int64(s) { sum += kb; found = true }
         }
-        return last
+        return found ? sum : nil
     }
 }
