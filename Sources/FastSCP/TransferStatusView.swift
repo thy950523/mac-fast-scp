@@ -90,9 +90,9 @@ struct TransferStatusView: View {
     private var sizeAndRateText: String {
         let rate = p.rateBytesPerSec.map { ByteFormat.rate($0) } ?? "—"
         switch p.sizeKnowledge {
-        case .full:
+        case .full, .totalsOnly:
             return "\(ByteFormat.size(p.completedBytes)) / \(ByteFormat.size(p.totalBytes)) · \(rate)"
-        case .totalsOnly, .unknown:
+        case .unknown:
             return rate
         }
     }

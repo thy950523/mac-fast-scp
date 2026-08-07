@@ -44,7 +44,7 @@ final class TransferTracker: ObservableObject {
             }.value
         case .receive:
             guard let r = remote else {
-                prep = PreparedTransfer(totalBytes: 0, totalFiles: 0, lookup: [:], sizeKnowledge: .unknown)
+                prep = PreparedTransfer(totalBytes: 0, totalFiles: 0, sizeKnowledge: .unknown)
                 break
             }
             prep = await SSHExecutor.shared.probeRemoteSizes(
@@ -53,7 +53,6 @@ final class TransferTracker: ObservableObject {
         aggregator = TransferAggregator(direction: direction,
                                         totalBytes: prep.totalBytes,
                                         totalFiles: prep.totalFiles,
-                                        fileSizeLookup: prep.lookup,
                                         sizeKnowledge: prep.sizeKnowledge)
         progress = aggregator.progress
     }
@@ -69,6 +68,7 @@ final class TransferTracker: ObservableObject {
     func ingest(_ event: SCPProgress?) {
         guard let p = event else { return }
         aggregator.ingest(ParsedProgress(percent: Double(p.percent) / 100.0,
+                                         transferredBytes: p.fileTransferredBytes,
                                          fileName: p.fileName,
                                          rateBytesPerSec: p.rateBytesPerSec))
         progress = aggregator.progress
@@ -90,20 +90,16 @@ private enum LocalScanner {
     static func scan(urls: [URL]) -> PreparedTransfer {
         var total: Int64 = 0
         var count = 0
-        var lookup: [String: Int64] = [:]
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey,
                                       .isSymbolicLinkKey, .fileSizeKey]
         for root in urls {
-            let rootURL = root.hasDirectoryPath ? root : root.deletingLastPathComponent()
-            // `FileManager.enumerator(at:)` yields nothing when given a FILE url
-            // (it only enumerates directory contents), so measure a directly-
-            // selected file explicitly.
+            // `FileManager.enumerator(at:)` yields nothing for a FILE url (it
+            // only enumerates directory contents), so measure files directly.
             if !root.hasDirectoryPath {
                 if let size = fileSize(root) {
                     total += size
                     count += 1
-                    lookup[root.lastPathComponent] = size
                 }
                 continue
             }
@@ -112,21 +108,12 @@ private enum LocalScanner {
                 for case let url as URL in e {
                     let rv = try? url.resourceValues(forKeys: Set(keys))
                     if rv?.isSymbolicLink == true || rv?.isDirectory == true { continue }
-                    let size = Int64(rv?.fileSize ?? 0)
-                    total += size
+                    total += Int64(rv?.fileSize ?? 0)
                     count += 1
-                    // Key by basename and by path relative to the selection root;
-                    // scp prints the relative path for files inside a recursive
-                    // directory, and just the basename for top-level files.
-                    lookup[url.lastPathComponent] = size
-                    if let rel = relativePath(url, from: rootURL) {
-                        lookup[rel] = size
-                    }
                 }
             }
         }
-        return PreparedTransfer(totalBytes: total, totalFiles: count,
-                                lookup: lookup, sizeKnowledge: .full)
+        return PreparedTransfer(totalBytes: total, totalFiles: count, sizeKnowledge: .full)
     }
 
     private static func fileSize(_ url: URL) -> Int64? {
@@ -134,14 +121,5 @@ private enum LocalScanner {
         guard let rv = try? url.resourceValues(forKeys: keys),
               rv.isRegularFile == true else { return nil }
         return Int64(rv.fileSize ?? 0)
-    }
-
-    private static func relativePath(_ url: URL, from root: URL) -> String? {
-        let rootPath = root.standardizedFileURL.path
-        let filePath = url.standardizedFileURL.path
-        guard filePath.hasPrefix(rootPath) else { return nil }
-        var rel = String(filePath.dropFirst(rootPath.count))
-        if rel.hasPrefix("/") { rel.removeFirst() }
-        return rel.isEmpty ? nil : rel
     }
 }

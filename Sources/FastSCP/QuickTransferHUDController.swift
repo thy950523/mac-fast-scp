@@ -113,7 +113,7 @@ private struct HUDView: View {
                     ProgressView(value: p.percent).progressViewStyle(.linear)
                 }
                 HStack(spacing: 6) {
-                    if p.sizeKnowledge == .full {
+                    if p.sizeKnowledge != .unknown {
                         Text("\(ByteFormat.size(p.completedBytes)) / \(ByteFormat.size(p.totalBytes))")
                             .font(.caption2).monospacedDigit()
                     } else {

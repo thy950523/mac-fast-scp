@@ -9,12 +9,14 @@ public enum TransferPhase: Equatable, Sendable {
 
 public enum TransferDirection: String, Sendable { case send, receive }
 
-/// How much we know about the transfer's total size; drives which progress
-/// fields the UI can show.
+/// How much we know about the transfer's total size.
+/// `.full` and `.totalsOnly` both compute percent from real transferred bytes;
+/// the only difference is whether the UI shows "X / Y MB". `.unknown` shows
+/// an indeterminate bar.
 public enum SizeKnowledge: Sendable {
-    case full        // total bytes + per-file sizes → smooth byte-level progress
-    case totalsOnly  // total bytes + file count only → ratio by file count
-    case unknown     // nothing → indeterminate bar + current file name
+    case full        // total bytes known (local scan or `find -printf`)
+    case totalsOnly  // total bytes known (`du -sk`) but no per-file sizes
+    case unknown     // total unknown → indeterminate bar
 }
 
 public struct TransferProgress: Equatable, Sendable {
@@ -36,11 +38,14 @@ public struct TransferProgress: Equatable, Sendable {
 }
 
 public struct ParsedProgress: Equatable, Sendable {
-    public let percent: Double          // 0...1
+    public let percent: Double                 // 0...1
+    public let transferredBytes: Int64?        // real bytes for the current file
     public let fileName: String?
     public let rateBytesPerSec: Int64?
-    public init(percent: Double, fileName: String?, rateBytesPerSec: Int64?) {
+    public init(percent: Double, transferredBytes: Int64?,
+                fileName: String?, rateBytesPerSec: Int64?) {
         self.percent = percent
+        self.transferredBytes = transferredBytes
         self.fileName = fileName
         self.rateBytesPerSec = rateBytesPerSec
     }
@@ -49,42 +54,37 @@ public struct ParsedProgress: Equatable, Sendable {
 public struct PreparedTransfer: Equatable, Sendable {
     public let totalBytes: Int64
     public let totalFiles: Int
-    public let lookup: [String: Int64]
     public let sizeKnowledge: SizeKnowledge
-    public init(totalBytes: Int64, totalFiles: Int, lookup: [String: Int64], sizeKnowledge: SizeKnowledge) {
+    public init(totalBytes: Int64, totalFiles: Int, sizeKnowledge: SizeKnowledge) {
         self.totalBytes = totalBytes
         self.totalFiles = totalFiles
-        self.lookup = lookup
         self.sizeKnowledge = sizeKnowledge
     }
 }
 
-/// Pure state machine that turns per-file scp progress events into a monotonic
-/// total. No UI or concurrency dependencies — fully unit-testable.
+/// Pure state machine that turns scp per-file progress events into a monotonic
+/// byte-based total. Accumulates the **real transferred bytes** scp reports on
+/// each progress line (the size field after the percent), so the bar is byte-
+/// accurate for both send and receive regardless of how the total was obtained.
 public struct TransferAggregator {
     public let direction: TransferDirection
     public let totalBytes: Int64
     public let totalFiles: Int
     public let sizeKnowledge: SizeKnowledge
 
-    private var fileSizeLookup: [String: Int64]
-    private var completedBytes: Int64 = 0
-    private var completedFiles: Int = 0
+    private var completedBytes: Int64 = 0     // bytes of fully-prior files
     private var currentFileName: String?
     private var currentFileIndex: Int = 0
-    private var currentFileSize: Int64 = 0
-    private var currentFileBytesSeen: Int64 = 0
-    private var currentFileMaxPct: Double = 0
+    private var currentFileBytesSeen: Int64 = 0  // max transferred bytes for the current file
     private var phase: TransferPhase = .preparing
     private var rateBytesPerSec: Int64?
     private var etaSeconds: Int?
 
     public init(direction: TransferDirection, totalBytes: Int64, totalFiles: Int,
-                fileSizeLookup: [String: Int64] = [:], sizeKnowledge: SizeKnowledge = .full) {
+                sizeKnowledge: SizeKnowledge = .full) {
         self.direction = direction
         self.totalBytes = totalBytes
         self.totalFiles = totalFiles
-        self.fileSizeLookup = fileSizeLookup
         self.sizeKnowledge = sizeKnowledge
     }
 
@@ -104,56 +104,24 @@ public struct TransferAggregator {
 
     public mutating func ingest(_ event: ParsedProgress) {
         if case .preparing = phase { phase = .sending }
-        let pct = min(max(event.percent, 0), 1)
 
         if let name = event.fileName, name != currentFileName {
-            // Credit the previous file only if there was one (the first
-            // transition has nothing to close out yet).
+            // Close out the previous file with its last observed byte count.
             if currentFileName != nil {
-                switch sizeKnowledge {
-                case .full:
-                    completedBytes += currentFileSize
-                case .totalsOnly:
-                    completedFiles += 1
-                    if totalFiles > 0 {
-                        completedBytes = totalBytes * Int64(completedFiles) / Int64(totalFiles)
-                    }
-                case .unknown:
-                    break
-                }
+                completedBytes += currentFileBytesSeen
             }
             currentFileIndex = min(currentFileIndex + 1, max(totalFiles, 1))
             currentFileName = name
-            // Prefer the per-file size from the lookup; if unknown, assume this
-            // file accounts for all remaining bytes (correct for a single file
-            // with no lookup, and a sensible best-effort otherwise).
-            currentFileSize = fileSizeLookup[name]
-                ?? max(totalBytes - completedBytes, 0)
             currentFileBytesSeen = 0
-            currentFileMaxPct = 0
         } else if currentFileName == nil, let name = event.fileName {
             currentFileName = name
-            currentFileSize = fileSizeLookup[name]
-                ?? max(totalBytes - completedBytes, 0)
             currentFileIndex = min(currentFileIndex + 1, max(totalFiles, 1))
         }
 
-        switch sizeKnowledge {
-        case .full:
-            if pct >= currentFileMaxPct {
-                currentFileMaxPct = pct
-                currentFileBytesSeen = Int64(Double(currentFileSize) * pct)
-            }
-        case .totalsOnly:
-            if pct >= currentFileMaxPct { currentFileMaxPct = pct }
-            if totalFiles > 0 {
-                let ratio = min(max(
-                    Double(completedFiles) / Double(totalFiles)
-                        + pct / Double(totalFiles), 0), 1)
-                currentFileBytesSeen = Int64(Double(totalBytes) * ratio) - completedBytes
-            }
-        case .unknown:
-            currentFileBytesSeen = 0
+        // Real bytes transferred for the current file — scp gives us this
+        // directly on every progress line. Take the max to stay monotonic.
+        if let transferred = event.transferredBytes, transferred > currentFileBytesSeen {
+            currentFileBytesSeen = transferred
         }
 
         rateBytesPerSec = event.rateBytesPerSec

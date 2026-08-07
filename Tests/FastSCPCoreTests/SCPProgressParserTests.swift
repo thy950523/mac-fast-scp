@@ -39,6 +39,22 @@ final class SCPProgressParserTests: XCTestCase {
         XCTAssertGreaterThan(p!.rateBytesPerSec!, 1_000_000)
     }
 
+    func testParsesTransferredBytes() {
+        // The token after percent is the current file's transferred bytes.
+        let p = SCPProgressParser.parse("\rbig.bin  45%  450MB  10.0MB/s   0:00:05")
+        XCTAssertEqual(p?.fileTransferredBytes, 450 * 1024 * 1024)
+    }
+
+    func testParsesTransferredBytesAtZero() {
+        let p = SCPProgressParser.parse("\rf  0%  0  0.0KB/s --:-- ETA")
+        XCTAssertEqual(p?.fileTransferredBytes, 0)
+    }
+
+    func testParsesTransferredBytesKilo() {
+        let p = SCPProgressParser.parse("\rf  100%  4883KB  630.0MB/s 00:00")
+        XCTAssertEqual(p?.fileTransferredBytes, 4883 * 1024)
+    }
+
     func testPercentOnlyLineHasNilNameAndRate() {
         let p = SCPProgressParser.parse("42%")
         XCTAssertNotNil(p)

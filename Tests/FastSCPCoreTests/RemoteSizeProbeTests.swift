@@ -8,8 +8,6 @@ final class RemoteSizeProbeTests: XCTestCase {
         let r = RemoteSizeProbe.parseFindPrintf(out)
         XCTAssertEqual(r?.totalBytes, 80235)
         XCTAssertEqual(r?.totalFiles, 2)
-        XCTAssertEqual(r?.lookup["readme.md"], 12345)
-        XCTAssertEqual(r?.lookup["app.log"], 67890)
     }
 
     func testParseFindPrintfEmpty() {

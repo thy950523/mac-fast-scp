@@ -18,4 +18,14 @@ final class ByteFormatTests: XCTestCase {
         XCTAssertEqual(ByteFormat.size(-5), "0 B")
         XCTAssertEqual(ByteFormat.rate(-1), "0 B/s")
     }
+
+    func testParseSizeTokens() {
+        XCTAssertEqual(ByteFormat.parseSize("0"), 0)
+        XCTAssertEqual(ByteFormat.parseSize("512"), 512)
+        XCTAssertEqual(ByteFormat.parseSize("12KB"), 12 * 1024)
+        XCTAssertEqual(ByteFormat.parseSize("1.5MB"), Int64(1.5 * 1024 * 1024))
+        XCTAssertEqual(ByteFormat.parseSize("2GB"), 2 * 1024 * 1024 * 1024)
+        XCTAssertNil(ByteFormat.parseSize(""))
+        XCTAssertNil(ByteFormat.parseSize("n/a"))
+    }
 }

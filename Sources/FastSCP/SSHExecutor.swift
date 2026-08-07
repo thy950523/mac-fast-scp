@@ -66,7 +66,7 @@ actor SSHExecutor {
         let paths = names.map { shellQuoteRemotePath("\(base)/\($0)") }
         if let full = await probeTier1(alias: alias, paths: paths) { return full }
         if let totals = await probeTier2(alias: alias, paths: paths) { return totals }
-        return PreparedTransfer(totalBytes: 0, totalFiles: 0, lookup: [:], sizeKnowledge: .unknown)
+        return PreparedTransfer(totalBytes: 0, totalFiles: 0, sizeKnowledge: .unknown)
     }
 
     /// Quote a remote path for the remote shell invoked by `ssh <alias> <cmd>`.
@@ -101,7 +101,7 @@ actor SSHExecutor {
             let r = try await run(exec: "/usr/bin/ssh", args: args)
             guard let s = RemoteSizeProbe.parseFindPrintf(r.stdout) else { return nil }
             return PreparedTransfer(totalBytes: s.totalBytes, totalFiles: s.totalFiles,
-                                    lookup: s.lookup, sizeKnowledge: .full)
+                                    sizeKnowledge: .full)
         } catch {
             return nil
         }
@@ -121,7 +121,7 @@ actor SSHExecutor {
             let duOut = try await run(exec: "/usr/bin/ssh", args: dArgs).stdout
             guard let kb = RemoteSizeProbe.parseDuTotalKB(duOut) else { return nil }
             return PreparedTransfer(totalBytes: kb * 1024, totalFiles: count,
-                                    lookup: [:], sizeKnowledge: .totalsOnly)
+                                    sizeKnowledge: .totalsOnly)
         } catch {
             return nil
         }

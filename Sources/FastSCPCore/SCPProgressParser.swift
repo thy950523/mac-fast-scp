@@ -3,20 +3,25 @@ import Foundation
 public struct SCPProgress: Equatable, Sendable {
     public let percent: Int
     public let fileName: String?
+    /// Bytes transferred for the file currently in flight (from the size field
+    /// of scp's progress line), not the total.
+    public let fileTransferredBytes: Int64?
     public let rateBytesPerSec: Int64?
     public let detail: String
 
-    public init(percent: Int, fileName: String?, rateBytesPerSec: Int64?, detail: String) {
+    public init(percent: Int, fileName: String?, fileTransferredBytes: Int64?,
+                rateBytesPerSec: Int64?, detail: String) {
         self.percent = percent
         self.fileName = fileName
+        self.fileTransferredBytes = fileTransferredBytes
         self.rateBytesPerSec = rateBytesPerSec
         self.detail = detail
     }
 }
 
 public enum SCPProgressParser {
-    /// Best-effort parse of an OpenSSH `scp` stderr progress line:
-    /// "\r<name><spaces>NNN%<size> <rate> <eta>".
+    /// Best-effort parse of an OpenSSH `scp` progress line:
+    /// "\r<name><spaces>NNN% <transferred> <rate> <eta>".
     /// Returns nil if the line carries no percent at all.
     public static func parse(_ line: String) -> SCPProgress? {
         // Strip a leading CR and any control chars (e.g. the EOT/backspace
@@ -39,9 +44,17 @@ public enum SCPProgressParser {
         return SCPProgress(
             percent: pct,
             fileName: fileName.isEmpty ? nil : fileName,
+            fileTransferredBytes: parseTransferredBytes(from: detail),
             rateBytesPerSec: parseRate(from: detail),
             detail: detail
         )
+    }
+
+    /// The first whitespace-delimited token after the percent is the current
+    /// file's transferred size (`450MB`, `12KB`, `0`).
+    static func parseTransferredBytes(from detail: String) -> Int64? {
+        guard let first = detail.split(separator: " ").first else { return nil }
+        return ByteFormat.parseSize(String(first))
     }
 
     /// Parse "12.3MB/s", "456KB/s", "1.2GB/s" into bytes/second. Returns nil if absent.
