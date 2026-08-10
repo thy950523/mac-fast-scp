@@ -60,6 +60,8 @@ echo "==> 注销所有已存在的 FastSCP 扩展注册"
 # || true：pipefail 下 grep 无匹配返回 1，会让 set -e 在这里中止整个安装 ——
 # 而「一条注册都没有」正是上面清理副本之后的常态，那时脚本还没 ditto 到
 # /Applications 就死了。没有注册可清理不是错误。
+# 注意：它挂在整个 while 循环上，因此循环体内的 set -e 也一并失效 ——
+# 往下面加命令时要自己带 || true 或显式判错。
 pluginkit -mADvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
     | sed 's/.*Path = //' | while read -r p; do
     echo "    - $p"
