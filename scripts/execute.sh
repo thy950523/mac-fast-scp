@@ -22,6 +22,8 @@ echo "==> 3/4 构建 FastSCP.app（Debug）"
 # 用临时 derivedDataPath 并随后删除：留在共享 DerivedData 里的 .app 会被
 # LaunchServices 记一条，导致「设置 > 扩展」里多出一行同名 FastSCP。
 DEBUG_BUILD_DIR="${TMPDIR:-/tmp}/fastscp-debug-build"
+# xcodebuild 失败时 set -e 会跳过下面那条 rm，用 trap 兜住两条路径。
+trap 'rm -rf "$DEBUG_BUILD_DIR"' EXIT
 rm -rf "$DEBUG_BUILD_DIR"
 xcodebuild \
     -project FastSCP.xcodeproj \

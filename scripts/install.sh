@@ -22,13 +22,20 @@ APP_SRC="$BUILD_DIR/Build/Products/Release/FastSCP.app"
 
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
-# 只允许删除「以 FastSCP.app 结尾」且「位于 DerivedData 或 ~/Applications 之下」
-# 的路径。这道闸门是刻意收紧的：脚本里出现 rm -rf 就必须能一眼看出它删不到别处。
+# 只允许删除「以 FastSCP.app 结尾」「不含 .. 路径穿越」且「位于 DerivedData 或
+# ~/Applications 之下」的路径。这三道闸门是刻意收紧的：脚本里出现 rm -rf 就必须
+# 能一眼看出它删不到别处。
 purge_app_copy() {
     local path="$1"
     case "$path" in
         */FastSCP.app) ;;
         *) echo "    ! 跳过（非 FastSCP.app）：$path"; return ;;
+    esac
+    # 下面的范围闸门是纯字面匹配，而 case 的 * 会匹配 /，所以
+    # "$HOME/Applications/../../VICTIM/FastSCP.app" 能同时骗过前后两道。
+    # 含 .. 的路径一律拒收 —— 宁可漏删，不可误删。
+    case "$path" in
+        *..*) echo "    ! 跳过（含 .. 路径穿越）：$path"; return 0 ;;
     esac
     case "$path" in
         "$HOME"/Library/Developer/Xcode/DerivedData/*|"$HOME"/Applications/*) ;;
@@ -50,7 +57,7 @@ done < <(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -name "Fas
 purge_app_copy "$HOME/Applications/FastSCP.app"
 
 echo "==> 注销所有已存在的 FastSCP 扩展注册"
-pluginkit -mAvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
+pluginkit -mADvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
     | sed 's/.*Path = //' | while read -r p; do
     echo "    - $p"
     pluginkit -r "$p" 2>/dev/null || true
@@ -88,7 +95,9 @@ open -a "$APP_DEST"
 sleep 3
 
 echo "==> 当前扩展注册（应只有一条，指向 /Applications）"
-pluginkit -mAvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep -E "$EXT_ID|Path = " || echo "    (未注册)"
+pluginkit -mADvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep -E "$EXT_ID|Path = " || echo "    (未注册)"
 
 echo "==> LaunchServices 中的 FastSCP.app 路径（应只有 /Applications 一条）"
-"$LSREGISTER" -dump 2>/dev/null | grep -oE '/[^ "]*FastSCP\.app' | sort -u | sed 's/^/    /'
+# || true：pipefail 下 grep 无匹配会返回 1，而这是脚本最后一条命令，
+# 会变成 install.sh 的退出码 —— 装好了却报失败。
+"$LSREGISTER" -dump 2>/dev/null | grep -oE '/[^ "]*FastSCP\.app' | sort -u | sed 's/^/    /' || true
