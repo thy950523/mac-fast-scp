@@ -116,3 +116,65 @@ Process(/usr/bin/script -q /dev/null /usr/bin/scp -O -r <args>)
 ## 已知影响
 
 清理会注销并删除 `~/Applications/FastSCP.app`，它当前是唯一注册 appex 的副本。清理后扩展重新指向 `/Applications` 那份，可能需要在设置里重新勾选一次扩展开关，Finder 菜单才会恢复。
+
+## 实现记录
+
+实现于 2026-08-10，按 `docs/superpowers/plans/2026-08-10-scp-progress-and-extension-dedup.md` 执行，分支 `fix/scp-progress-extension-dedup`。
+
+**已完成**
+
+- 未提交的 rsync 改动全部 revert，两个 rsync 源文件已删除。删除后需要 `xcodegen generate`
+  重新生成 `.xcodeproj`（它被 git 忽略但仍列着已删文件，否则构建失败）。
+- `SCPCommandBuilder` 加 `-O`，修正了「macOS scp 忽略 -O」的错误注释。
+- `SSHExecutor` 改用 `script -q /dev/null` + 标准 `Process`，删除 forkpty/termios/
+  TCP_NODELAY/轮询读线程一整套 C 互操作（-134/+70 行）；取消改为 `proc.terminate()`
+  + 250ms SIGKILL 兜底。
+- `install.sh` 新增「消除竞争副本」步骤；`execute.sh` 的 Debug 构建改用临时 derivedDataPath。
+
+**验收结果**
+
+进度（Task 4，人工验证）：发送与接收进度条均平滑推进，本次改动的核心目标达成。
+
+扩展去重（Task 6，人工验证）：LaunchServices 与 PluginKit 各只剩一条指向 `/Applications`
+的记录，`~/Applications` 旧副本与 DerivedData 构建产物均已清除，设置面板确认只有一行。
+
+**实现中修正的三处计划缺陷**
+
+1. `[ -d "$path" ] || return` 在 `set -e` 下会传播退出码 1 并中止 `install.sh` ——
+   且恰好在本次改动造成的稳态（副本已清干净）下触发。改为 `return 0`。
+2. `pluginkit -mAvvv` 是错的。按 man page，`-A` 只返回**每个版本最后注册的那个实例**，
+   而本项目的情况正是同版本 4 份副本。实测 `-mAvvv` 列出 482 条 `Path`，`-mADvvv`
+   列出 494 条（多出 12 条被隐藏的重复实例）。核对处用 `-A` 会只显示一行、
+   谎报「已只剩一条」。两处均改为 `-mADvvv`。
+3. 末尾的 `grep` 无匹配时在 `pipefail` 下返回 1，作为脚本最后一条命令会让安装成功的
+   `install.sh` 报失败。加 `|| true`。
+
+另外给删除闸门补了第三道 `..` 路径穿越拒绝：原先两道闸门是纯字面匹配，而 `case` 的 `*`
+会匹配 `/`，所以 `$HOME/Applications/../../VICTIM/FastSCP.app` 能同时骗过两道。当前没有
+调用点能传入 `..`，但这个函数会对用户 home 目录跑 `rm -rf`，注释又声称「一眼看出它删不到
+别处」——补上闸门让这句话成立。
+
+以及一处 Task 6 验收时发现的脚本缺陷：两个脚本都在 `rm -rf` 临时构建目录后**紧接着**
+打印 LaunchServices 核对，正好落在 LS 的收敛窗口内，每次都显示 2-3 行、看着像失败
+（实测目录已从磁盘删除，约 20 秒后 LS 自行收敛回一条）。改为删除前先主动
+`lsregister -u`，不等系统淘汰。
+
+## 遗留问题（不属于本次计划范围）
+
+Task 4 人工验收时发现三个传输相关缺陷，**均非本次改动引入**，已另行安排修复：
+
+- **快捷发送 HUD 没有取消按钮** —— `QuickTransferHUDController` 的 `.sending` 分支从未
+  绘制取消按钮，功能从未实现过。
+- **接收取消后 UI 卡在「接收中」** —— 表象，根因见下。
+- **`SSHExecutor` 单例并发冲突（根因）** —— 它是 `static let shared`，只有一个
+  `runningProcess` 字段，但传输可以并发。`debug.log` 实证：
+
+      11:06:09 [ssh] scp args=... epub      <- 传输 A 开始
+      11:06:20 [ssh] scp args=... psd       <- 传输 B 开始，A 仍在跑
+      11:06:24 [ssh] cancel() process=true  <- 杀掉的是 B
+      11:06:55 [ssh] OK                     <- A 照常完成
+
+  后启动的传输覆盖了先前的进程引用，先启动的那个从此无法取消（日志中多次出现
+  `cancel() called process=false`），且 `cancelled` 标志会被后续传输重置。
+
+修复方向（已与使用者确认）：改为每个传输持有独立句柄，取消只作用于自己那个；HUD 加取消按钮。

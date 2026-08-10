@@ -88,6 +88,9 @@ echo "==> 注册 App 与扩展"
 pluginkit -a "$APP_DEST/Contents/PlugIns/FastSCPFinderSync.appex"
 
 # 构建产物本身也带一份 appex，留着会被再次扫描成重复项。
+# 先主动注销再删目录：只删不注销的话，LaunchServices 要过几十秒才会淘汰
+# 指向已删路径的记录，而下面的核对紧接着就跑 —— 每次都显示 2-3 行，看着像失败。
+"$LSREGISTER" -u "$APP_SRC" 2>/dev/null || true
 rm -rf "$BUILD_DIR"
 
 echo "==> 启动"
