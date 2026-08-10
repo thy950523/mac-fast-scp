@@ -20,8 +20,37 @@ xcodebuild -project "$ROOT/FastSCP.xcodeproj" -scheme FastSCP \
     -derivedDataPath "$BUILD_DIR" build >/dev/null
 APP_SRC="$BUILD_DIR/Build/Products/Release/FastSCP.app"
 
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+# 只允许删除「以 FastSCP.app 结尾」且「位于 DerivedData 或 ~/Applications 之下」
+# 的路径。这道闸门是刻意收紧的：脚本里出现 rm -rf 就必须能一眼看出它删不到别处。
+purge_app_copy() {
+    local path="$1"
+    case "$path" in
+        */FastSCP.app) ;;
+        *) echo "    ! 跳过（非 FastSCP.app）：$path"; return ;;
+    esac
+    case "$path" in
+        "$HOME"/Library/Developer/Xcode/DerivedData/*|"$HOME"/Applications/*) ;;
+        *) echo "    ! 跳过（不在允许范围内）：$path"; return ;;
+    esac
+    # 注意 return 0：脚本开头是 set -e，不存在的路径若原样返回 [ -d ] 的 1，
+    # 整个 install.sh 会在这里中止（副本已清干净时正是这种情况）。
+    [ -d "$path" ] || return 0
+    echo "    - $path"
+    "$LSREGISTER" -u "$path" 2>/dev/null || true
+    rm -rf "$path"
+}
+
+echo "==> 清理磁盘上的竞争副本（DerivedData 构建产物 / ~/Applications 旧副本）"
+# 先断源头：磁盘上的 .app 不删，lsregister -u 之后会被重新索引加回来。
+while IFS= read -r p; do
+    purge_app_copy "$p"
+done < <(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -name "FastSCP.app" -type d 2>/dev/null)
+purge_app_copy "$HOME/Applications/FastSCP.app"
+
 echo "==> 注销所有已存在的 FastSCP 扩展注册"
-pluginkit -mDvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
+pluginkit -mAvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
     | sed 's/.*Path = //' | while read -r p; do
     echo "    - $p"
     pluginkit -r "$p" 2>/dev/null || true
@@ -60,3 +89,6 @@ sleep 3
 
 echo "==> 当前扩展注册（应只有一条，指向 /Applications）"
 pluginkit -mAvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep -E "$EXT_ID|Path = " || echo "    (未注册)"
+
+echo "==> LaunchServices 中的 FastSCP.app 路径（应只有 /Applications 一条）"
+"$LSREGISTER" -dump 2>/dev/null | grep -oE '/[^ "]*FastSCP\.app' | sort -u | sed 's/^/    /'

@@ -19,15 +19,21 @@ xcodebuild test \
     -quiet
 
 echo "==> 3/4 构建 FastSCP.app（Debug）"
+# 用临时 derivedDataPath 并随后删除：留在共享 DerivedData 里的 .app 会被
+# LaunchServices 记一条，导致「设置 > 扩展」里多出一行同名 FastSCP。
+DEBUG_BUILD_DIR="${TMPDIR:-/tmp}/fastscp-debug-build"
+rm -rf "$DEBUG_BUILD_DIR"
 xcodebuild \
     -project FastSCP.xcodeproj \
     -scheme FastSCP \
     -configuration Debug \
     -destination 'platform=macOS' \
+    -derivedDataPath "$DEBUG_BUILD_DIR" \
     build \
     CODE_SIGN_IDENTITY=- \
     CODE_SIGN_STYLE=Manual \
     -quiet
+rm -rf "$DEBUG_BUILD_DIR"
 
 echo "==> 4/4 Release 构建并安装到 /Applications"
 exec "$ROOT/scripts/install.sh"
