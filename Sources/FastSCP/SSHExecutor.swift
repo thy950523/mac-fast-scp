@@ -233,13 +233,23 @@ actor SSHExecutor {
         let lineScanner = LineScanner { line in progress(SCPProgressParser.parse(line)) }
 
         // readabilityHandler 在后台队列上按到达节奏回调，无需自建线程或轮询。
+        //
+        // 但 `readabilityHandler = nil` 并不会同步取消已派发的 block，所以退出后的
+        // 收尾 drain 可能与某次 handler 回调并发。两边都要 read(2) 同一个 fd：若不
+        // 串行化，后到的块可能先被 append，错误信息会乱序、进度行会解析出重复值。
+        // 因此把「读 + 累加 + 喂给 LineScanner」整体放到一个串行队列上 —— 读也必须
+        // 在队列内，只锁住 append/feed 挡不住两个 read(2) 本身抢跑。
+        // 这也顺带保证 LineScanner.feed 永不并发（它在回调期间会放锁）。
+        let ioQueue = DispatchQueue(label: "com.zhuzhong.FastSCP.scp-io")
         let handle = output.fileHandleForReading
         handle.readabilityHandler = { fh in
-            let chunk = fh.availableData
-            guard !chunk.isEmpty else { return }
-            collected.append(chunk)
-            if let text = String(data: chunk, encoding: .utf8) {
-                lineScanner.feed(text)
+            ioQueue.sync {
+                let chunk = fh.availableData
+                guard !chunk.isEmpty else { return }
+                collected.append(chunk)
+                if let text = String(data: chunk, encoding: .utf8) {
+                    lineScanner.feed(text)
+                }
             }
         }
 
@@ -254,13 +264,20 @@ actor SSHExecutor {
 
         await waitForExit(proc)
 
-        handle.readabilityHandler = nil
-        // 进程退出与 handler 最后一次回调之间有窗口，把残留数据补读进来。
-        let tailData = handle.availableData
-        if !tailData.isEmpty {
-            collected.append(tailData)
-            if let text = String(data: tailData, encoding: .utf8) {
-                lineScanner.feed(text)
+        // 清除 handler 与收尾 drain 都在 ioQueue 上，二者与 handler 回调互斥排队，
+        // 顺序无歧义：这次 sync 之后不会再有任何 block 碰 handle。
+        ioQueue.sync {
+            handle.readabilityHandler = nil
+            // 进程退出与 handler 最后一次回调之间有窗口，把残留数据补读进来。
+            // script 是写端唯一持有者（Process 启动后已关掉父进程这一份），进程既已
+            // 退出，EOF 必定到达，所以这里读到底比单次 availableData 更完整 ——
+            // availableData 只保证一次 read(2)，缓冲里剩下的可能读不干净。
+            let tailData = handle.readDataToEndOfFile()
+            if !tailData.isEmpty {
+                collected.append(tailData)
+                if let text = String(data: tailData, encoding: .utf8) {
+                    lineScanner.feed(text)
+                }
             }
         }
         runningProcess = nil
@@ -276,7 +293,11 @@ actor SSHExecutor {
             throw SSHError.transferFailed(stderr: tail)
         }
         DiagLog.log("[ssh] OK")
-        progress(nil) // signal completion
+        // 注意：nil 不是完成信号。上面的 LineScanner 回调对每一条解析不出进度的行
+        // 都会传 nil（传输途中很常见，失败与取消路径同样会传），而调用方
+        // TransferTracker.ingest 一律 `guard let ... else { return }` 丢弃 nil。
+        // 这一次调用因此是无害的收尾，别当成「只发一次的结束事件」来依赖。
+        progress(nil)
     }
 }
 
