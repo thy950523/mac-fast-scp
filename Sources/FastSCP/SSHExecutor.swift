@@ -264,8 +264,9 @@ actor SSHExecutor {
 
         await waitForExit(proc)
 
-        // 清除 handler 与收尾 drain 都在 ioQueue 上，二者与 handler 回调互斥排队，
-        // 顺序无歧义：这次 sync 之后不会再有任何 block 碰 handle。
+        // 清除 handler 与收尾 drain 都在 ioQueue 上，与 handler 回调互斥排队。
+        // （在此之前派发的 block 仍可能排在这次 sync 后面才跑，但那时 fd 已到
+        // EOF，读到空 Data 后直接 return，不会再改动 collected。）
         ioQueue.sync {
             handle.readabilityHandler = nil
             // 进程退出与 handler 最后一次回调之间有窗口，把残留数据补读进来。

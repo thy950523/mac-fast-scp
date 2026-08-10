@@ -57,11 +57,14 @@ done < <(find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -name "Fas
 purge_app_copy "$HOME/Applications/FastSCP.app"
 
 echo "==> 注销所有已存在的 FastSCP 扩展注册"
+# || true：pipefail 下 grep 无匹配返回 1，会让 set -e 在这里中止整个安装 ——
+# 而「一条注册都没有」正是上面清理副本之后的常态，那时脚本还没 ditto 到
+# /Applications 就死了。没有注册可清理不是错误。
 pluginkit -mADvvv 2>/dev/null | grep -A1 "$EXT_ID" | grep "Path = " \
     | sed 's/.*Path = //' | while read -r p; do
     echo "    - $p"
     pluginkit -r "$p" 2>/dev/null || true
-done
+done || true
 
 echo "==> 退出正在运行的 FastSCP"
 pkill -f "FastSCP.app/Contents/MacOS/FastSCP" 2>/dev/null || true

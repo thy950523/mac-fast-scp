@@ -73,8 +73,10 @@ final class TransferTracker: ObservableObject {
     }
 
     /// Feed a parsed scp progress event (from the SSHExecutor callback).
-    /// A nil event is the end-of-stream marker; definitive success/failure is
-    /// driven by the caller via `complete()` / `fail()`.
+    /// nil means "this output line carried no progress" — common mid-transfer,
+    /// and also passed on the failure/cancel paths. It is NOT an end-of-stream
+    /// or completion marker; success/failure is driven by the caller via
+    /// `complete()` / `fail()`.
     func ingest(_ event: SCPProgress?) {
         guard let p = event else { return }
         aggregator.ingest(ParsedProgress(percent: Double(p.percent) / 100.0,
