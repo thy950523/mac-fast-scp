@@ -334,17 +334,19 @@ ssh nana        # 应该免密直接登录到你的服务器
 ## 5. 支持与赞助
 
 如果你觉得 FastSCP 让你的日常工作省了一点时间，愿意支持它继续打磨，可以用下面的方式请我喝杯咖啡 ☕。这完全是自愿的，不影响任何功能使用。
-<img alt="微信赞赏码" src="docs/wechat.png" width="220"/>
 
-<!--
 <p align="center">
-  <img alt="微信赞赏" src="docs/wechat-qr.png" width="180">
-  &nbsp;&nbsp;
-  <img alt="支付宝" src="docs/alipay-qr.png" width="180">
+  <img alt="微信赞赏码" src="docs/wechat.png" width="240"><br>
+  <sub>微信扫码赞赏</sub>
 </p>
--->
 
 无论以什么方式支持，都非常感谢你。🙏
+
+<!--
+后续如果要加支付宝 / Buy me a Coffee，把二维码图片放到 docs/ 后，
+在上面的 <p align="center"> 里并排加入即可，例如：
+  <img alt="支付宝" src="docs/alipay.png" width="240">
+-->
 
 ---
 
