@@ -23,8 +23,6 @@ enum SSHError: LocalizedError {
 actor SSHExecutor {
     static let shared = SSHExecutor()
     private var runningProcess: Process?
-    /// pid of the pty child (scp), when a transfer is running via forkpty.
-    private var childPid: pid_t = 0
     private var cancelled = false
 
     /// `ssh <alias> ls -ap <path>` → directory entries (filtered to dirs).
@@ -41,28 +39,22 @@ actor SSHExecutor {
         return LsParser.parse(result.stdout)
     }
 
-    /// `scp -r <sources> <alias>:<path>`; `progress` receives parsed updates.
-/// NOTE: macOS's `/usr/bin/scp` silently ignores the `-O` (legacy protocol)
-/// flag — its usage output lists `[-346ABCOpqRrsTv]` but on this build O is
-/// not recognized, so we fall back to the default SFTP mode, which emits only
-/// 2 progress lines per file (start + end). There is no portable way to get
-/// per-block progress from the macOS scp client.
+    /// `scp -r -O <sources> <alias>:<path>`; `progress` receives parsed updates.
     func transfer(alias: String, path: String, sources: [URL],
                   progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
-        var args = ["-r"]
+        var args = ["-r", SCPCommandBuilder.legacyProtocolFlag]
         args.append(contentsOf: sources.map(\.path))
         let safePath = path.hasSuffix("/") ? path : path + "/"
         args.append("\(alias):\(safePath)")
-        try await runWithProgress(exec: "/usr/bin/scp", args: args, progress: progress)
+        try await runWithProgress(args: args, progress: progress)
     }
 
-    /// `scp -r <alias>:<remotePath>/<name> ... <localDest>/`；argv 由 `SCPCommandBuilder` 构造。
-    /// See note on `transfer` regarding `-O`.
+    /// `scp -r -O <alias>:<remotePath>/<name> ... <localDest>/`；argv 由 `SCPCommandBuilder` 构造。
     func pull(alias: String, remotePath: String, names: [String],
               localDest: URL, progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
         let args = SCPCommandBuilder.pullArgs(
             alias: alias, remotePath: remotePath, names: names, localDest: localDest)
-        try await runWithProgress(exec: "/usr/bin/scp", args: args, progress: progress)
+        try await runWithProgress(args: args, progress: progress)
     }
 
     /// Remove existing entries (`rm -rf`) at `<alias>:<path>/<name>` so a send
@@ -157,23 +149,19 @@ actor SSHExecutor {
     }
 
     func cancel() {
-        DiagLog.log("[ssh] cancel() called process=\(runningProcess != nil) childPid=\(childPid)")
+        DiagLog.log("[ssh] cancel() called process=\(runningProcess != nil)")
         cancelled = true
-        if childPid > 0 {
-            let pid = childPid
-            childPid = 0
-            // Send TERM first (clean remote teardown); if the child is still alive
-            // 250ms later, force-kill it so the pty closes and the reader resumes.
-            _ = kill(pid, SIGTERM)
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + .milliseconds(250)) {
-                if kill(pid, 0) == 0 {
-                    DiagLog.log("[ssh] cancel: TERM ignored, sending SIGKILL")
-                    _ = kill(pid, SIGKILL)
-                }
+        guard let proc = runningProcess, proc.isRunning else { return }
+        // TERM 给 script；scp 在独立进程组里，会因 pty 主端关闭收到 SIGHUP 退出
+        // （压测 6/6 次无孤儿进程）。250ms 后仍在则强杀兜底。
+        proc.terminate()
+        let pid = proc.processIdentifier
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + .milliseconds(250)) {
+            if kill(pid, 0) == 0 {
+                DiagLog.log("[ssh] cancel: TERM ignored, sending SIGKILL")
+                _ = kill(pid, SIGKILL)
             }
         }
-        runningProcess?.terminate()
-        runningProcess = nil
     }
 
     // MARK: - internals
@@ -212,135 +200,105 @@ actor SSHExecutor {
         return ExecResult(stdout: String(data: outData, encoding: .utf8) ?? "", stderr: stderr)
     }
 
-    private func runWithProgress(exec: String, args: [String],
+    /// 用 `script(1)` 分配伪终端后运行 scp，边读边解析进度。
+    ///
+    /// scp 对 stdout 做 `isatty()` 检测：直连管道时进度条**一个字节都不输出**
+    /// （实测 0 字节），`-v` 也只有握手日志、不含进度。所以必须有 pty。
+    ///
+    /// 这里用 `script -q /dev/null` 而非手写 forkpty —— 实测 `script` 包装后经
+    /// 普通管道读取，进度每秒实时到达（0.13s / 1.14s / 2.14s …），没有块缓冲。
+    /// 早先代码认为「script 会块缓冲导致进度卡在 0%」，那个诊断是错的：真正
+    /// 的原因是缺 `-O`，SFTP 模式下字节计数器本身就不动。
+    ///
+    /// stdin 必须是**保持打开的管道**：喂 `/dev/null` 会让 ssh 在 keychain
+    /// 提示前就判定认证失败而中止。
+    private func runWithProgress(args: [String],
                                  progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
         cancelled = false
-        DiagLog.log("[ssh] exec=\(exec) args=\(args.joined(separator: " "))")
+        DiagLog.log("[ssh] scp args=\(args.joined(separator: " "))")
 
-        // scp (OpenSSH ≥9, SFTP mode) emits its progress meter only to a TTY.
-        // We previously wrapped scp in `script -q /dev/null`, but `script`
-        // block-buffers its stdout when it's a pipe, so progress arrived in
-        // multi-second bursts and the bar looked frozen at 0%. Instead we
-        // allocate a pty directly with forkpty and exec scp as the session
-        // leader: scp sees a controlling terminal (progress flows), and we read
-        // the pty master ourselves, so progress bytes arrive in real time. The
-        // open master also keeps ssh's stdin from EOF-ing, so it waits for the
-        // keychain/agent prompt instead of aborting auth.
-        let argv = [exec] + args
-        var cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
-        cArgs.append(nil)
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        proc.arguments = ["-q", "/dev/null", "/usr/bin/scp"] + args
 
-        var masterFd: Int32 = -1
-        // Configure a proper PTY so scp believes it has a real interactive terminal
-        // and emits per-block progress. Two critical settings:
-        //   1. ICANON must be OFF: canonical mode buffers input AND output until \n.
-        //      scp progress lines end with \r, not \n — with ICANON on, all 162
-        //      bytes get held in the kernel PTY buffer until scp exits, then one
-        //      read() returns everything at once. We get 2 lines, not per-block.
-        //   2. VMIN=1, VTIME=0: read() returns as soon as ≥1 byte is available,
-        //      so each progress line arrives in its own read() call.
-        //   3. TCP_NODELAY on the underlying socket: prevents Nagle-coalescing
-        //      of the small progress writes scp makes between SFTP ACKs.
-        var winsize = winsize()
-        winsize.ws_row = 24; winsize.ws_col = 200
-        var tios = termios()
-        // Control: 115200 baud, 8N1, local
-        tios.c_cflag = tcflag_t(B115200 | CS8 | CLOCAL | CREAD | HUPCL)
-        // Input: non-canonical, no signal chars, VMIN=1 VTIME=0
-        tios.c_iflag = tcflag_t(IGNPAR | ICRNL | IXON | IXOFF)
-        tios.c_lflag = tcflag_t(0)  // NO ICANON — raw mode for streaming output
-        tios.c_oflag = tcflag_t(OPOST | ONLCR)  // map \n→\r\n on output
-        tios.c_cc.16 = 1   // VMIN
-        tios.c_cc.17 = 0   // VTIME
-        var tiosPtr = UnsafeMutablePointer<termios>.allocate(capacity: 1)
-        tiosPtr.initialize(to: tios)
-        defer { tiosPtr.deinitialize(count: 1); tiosPtr.deallocate() }
-        errno = 0
-        let pid = forkpty(&masterFd, nil, tiosPtr, &winsize)
-        if pid < 0 {
-            cArgs.forEach { if let p = $0 { free(p) } }
-            throw SSHError.transferFailed(stderr: "无法分配伪终端（forkpty 失败）。")
-        }
-        // Disable Nagle on the PTY master socket so progress writes are not
-        // coalesced between SFTP ACK round-trips.
-        var one = Int32(1)
-        _ = setsockopt(masterFd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
-        if pid == 0 {
-            // ── child: become scp (only async-signal-safe calls until exec) ──
-            _ = close(masterFd)          // child uses the pty slave (0/1/2), not the master
-            // Set child as leader of its own process group so scp's
-            // getpgrp() == tcgetpgrp() check passes (foreground terminal).
-            _ = setpgid(0, 0)
-            _ = execvp(exec, &cArgs)
-            _exit(127)                   // only reached if exec fails
-        }
-        // ── parent ──
-        // Also setpgid in the parent to avoid race condition where the child
-        // execs before we set it here.
-        _ = setpgid(pid, pid)
-        cArgs.forEach { if let p = $0 { free(p) } }
+        // stdout 与 stderr 合流：进度写在 stdout，报错写在 stderr，失败时要一起回显。
+        let output = Pipe()
+        proc.standardOutput = output
+        proc.standardError = output
+        // 保持打开、永不写入 —— 见上方注释，不能用 /dev/null。
+        let stdin = Pipe()
+        proc.standardInput = stdin
 
         let collected = OutputAccumulator()
         let lineScanner = LineScanner { line in progress(SCPProgressParser.parse(line)) }
-        childPid = pid
-        let master = masterFd   // capture as let for the reader thread
 
-        // Make the PTY master non-blocking: read() returns immediately with EAGAIN
-        // if no data is buffered, rather than blocking until 8 KB are accumulated.
-        var flags = fcntl(master, F_GETFL)
-        _ = fcntl(master, F_SETFL, flags | O_NONBLOCK)
-
-        let status: Int32 = await withCheckedContinuation { (cont: CheckedContinuation<Int32, Never>) in
-            // Reader thread: non-blocking read() polls for available bytes. With a
-            // blocking read, we'd wait for 8 KB or EOF. With O_NONBLOCK + short sleep,
-            // we get each progress write as soon as it arrives (typically 40-80 bytes
-            // per SFTP ACK round-trip), giving the UI live updates without spinning.
-            let reader = Thread {
-                var readCalls = 0, totalBytes = 0, feedCalls = 0
-                while true {
-                    var buf = [UInt8](repeating: 0, count: 4096)
-                    let n = read(master, &buf, buf.count)
-                    if n > 0 {
-                        readCalls += 1; totalBytes += n
-                        let chunk = Data(bytes: buf, count: n)
-                        collected.append(chunk)
-                        if let text = String(data: chunk, encoding: .utf8) {
-                            lineScanner.feed(text); feedCalls += 1
-                        }
-                    } else if n < 0 && errno == EAGAIN {
-                        // Nothing buffered right now: sleep briefly so we don't
-                        // spin at 100% CPU, then check again. 50 ms feels live.
-                        usleep(50_000)
-                    } else {
-                        // n == 0: EOF (scp closed its write side) or real error.
-                        break
-                    }
+        // readabilityHandler 在后台队列上按到达节奏回调，无需自建线程或轮询。
+        //
+        // 但 `readabilityHandler = nil` 并不会同步取消已派发的 block，所以退出后的
+        // 收尾 drain 可能与某次 handler 回调并发。两边都要 read(2) 同一个 fd：若不
+        // 串行化，后到的块可能先被 append，错误信息会乱序、进度行会解析出重复值。
+        // 因此把「读 + 累加 + 喂给 LineScanner」整体放到一个串行队列上 —— 读也必须
+        // 在队列内，只锁住 append/feed 挡不住两个 read(2) 本身抢跑。
+        // 这也顺带保证 LineScanner.feed 永不并发（它在回调期间会放锁）。
+        let ioQueue = DispatchQueue(label: "com.zhuzhong.FastSCP.scp-io")
+        let handle = output.fileHandleForReading
+        handle.readabilityHandler = { fh in
+            ioQueue.sync {
+                let chunk = fh.availableData
+                guard !chunk.isEmpty else { return }
+                collected.append(chunk)
+                if let text = String(data: chunk, encoding: .utf8) {
+                    lineScanner.feed(text)
                 }
-                DiagLog.log("[ssh] pty-summary reads=\(readCalls) bytes=\(totalBytes) feedCalls=\(feedCalls)")
-                var st: Int32 = 0; _ = waitpid(pid, &st, 0); _ = close(master)
-                cont.resume(returning: st)
             }
-            reader.threadPriority = 0.5
-            reader.start()
         }
 
-        childPid = 0
+        runningProcess = proc
+        do {
+            try proc.run()
+        } catch {
+            handle.readabilityHandler = nil
+            runningProcess = nil
+            throw SSHError.transferFailed(stderr: "无法启动 scp：\(error.localizedDescription)")
+        }
+
+        await waitForExit(proc)
+
+        // 清除 handler 与收尾 drain 都在 ioQueue 上，与 handler 回调互斥排队。
+        // （在此之前派发的 block 仍可能排在这次 sync 后面才跑，但那时 fd 已到
+        // EOF，读到空 Data 后直接 return，不会再改动 collected。）
+        ioQueue.sync {
+            handle.readabilityHandler = nil
+            // 进程退出与 handler 最后一次回调之间有窗口，把残留数据补读进来。
+            // script 是写端唯一持有者（Process 启动后已关掉父进程这一份），进程既已
+            // 退出，EOF 必定到达，所以这里读到底比单次 availableData 更完整 ——
+            // availableData 只保证一次 read(2)，缓冲里剩下的可能读不干净。
+            let tailData = handle.readDataToEndOfFile()
+            if !tailData.isEmpty {
+                collected.append(tailData)
+                if let text = String(data: tailData, encoding: .utf8) {
+                    lineScanner.feed(text)
+                }
+            }
+        }
+        runningProcess = nil
+
         let tail = collected.text
         if cancelled {
             cancelled = false
             DiagLog.log("[ssh] cancelled by user")
             throw SSHError.cancelled
         }
-        // wait(2) status layout (BSD): low 7 bits 0 ⇒ normal exit; exit code
-        // is bits 8-15. A non-zero signal (cancel) makes this false, but we've
-        // already thrown .cancelled above in that case.
-        let cleanExit = (status >= 0) && ((status & 0x7f) == 0) && (((status >> 8) & 0xff) == 0)
-        if !cleanExit {
-            DiagLog.log("[ssh] FAILED status=\(status) output=\(tail)")
+        guard proc.terminationStatus == 0 else {
+            DiagLog.log("[ssh] FAILED status=\(proc.terminationStatus) output=\(tail)")
             throw SSHError.transferFailed(stderr: tail)
         }
         DiagLog.log("[ssh] OK")
-        progress(nil) // signal completion
+        // 注意：nil 不是完成信号。上面的 LineScanner 回调对每一条解析不出进度的行
+        // 都会传 nil（传输途中很常见，失败与取消路径同样会传），而调用方
+        // TransferTracker.ingest 一律 `guard let ... else { return }` 丢弃 nil。
+        // 这一次调用因此是无害的收尾，别当成「只发一次的结束事件」来依赖。
+        progress(nil)
     }
 }
 
