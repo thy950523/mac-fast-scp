@@ -1,0 +1,106 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0A0E16"/>
+      <stop offset="1" stop-color="#131B2E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(1060 110) rotate(45) scale(620 520)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F6BFF" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#2F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0" cy="0" r="1" gradientTransform="translate(120 560) rotate(-20) scale(500 320)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C3AED" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#7C3AED" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="1044" y1="292" x2="1126" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="word" x1="360" y1="0" x2="640" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <pattern id="dots" width="38" height="38" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1.1" fill="#FFFFFF" fill-opacity="0.055"/>
+    </pattern>
+    <filter id="soft" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <filter id="cardshadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="22" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#dots)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+  <rect width="1280" height="640" fill="url(#glow2)"/>
+
+  <!-- wordmark -->
+  <g font-family="-apple-system, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', Arial, sans-serif">
+    <text x="72" y="272" font-size="108" font-weight="800" letter-spacing="-3" fill="#FFFFFF">Fast<tspan fill="url(#word)">SCP</tspan></text>
+    <text x="78" y="336" font-size="29" font-weight="500" fill="#A9B8D3">在 Finder 里，一键把文件送到服务器。</text>
+    <text x="78" y="392" font-size="18" font-weight="600" fill="#7E8EAB" letter-spacing="0.5">macOS 14+&#160;&#160;·&#160;&#160;Swift&#160;&#160;·&#160;&#160;Finder 扩展&#160;&#160;·&#160;&#160;MIT</text>
+  </g>
+
+  <!-- ===== illustration: context menu ===== -->
+  <g filter="url(#cardshadow)">
+    <rect x="708" y="200" width="332" height="214" rx="16" fill="#FFFFFF" fill-opacity="0.06"/>
+    <rect x="708" y="200" width="332" height="214" rx="16" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <!-- header -->
+    <text x="728" y="232" font-family="-apple-system,'SF Pro Text','PingFang SC',sans-serif" font-size="14" font-weight="700" fill="#7DD3FC" letter-spacing="0.4">FastSCP</text>
+    <line x1="724" y1="246" x2="1024" y2="246" stroke="#FFFFFF" stroke-opacity="0.10"/>
+    <!-- item 1 highlighted -->
+    <rect x="720" y="256" width="308" height="38" rx="9" fill="#2F6BFF" fill-opacity="0.28"/>
+    <circle cx="738" cy="275" r="3.5" fill="#60A5FA"/>
+    <text x="754" y="281" font-family="-apple-system,'PingFang SC',sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">发送到 nana:/var/www</text>
+    <!-- item 2 -->
+    <path d="M734.5 311.5l4 4 4-4" stroke="#9FB0CC" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <text x="754" y="319" font-family="-apple-system,'PingFang SC',sans-serif" font-size="18" fill="#C2CEE3">最近发送</text>
+    <text x="966" y="319" font-family="-apple-system,sans-serif" font-size="18" fill="#9FB0CC">▸</text>
+    <!-- item 3 -->
+    <circle cx="738" cy="355" r="3.5" fill="none" stroke="#9FB0CC" stroke-width="1.6"/>
+    <text x="754" y="361" font-family="-apple-system,'PingFang SC',sans-serif" font-size="18" fill="#C2CEE3">传送到服务器…</text>
+  </g>
+
+  <!-- cursor pointing at item 1 -->
+  <g transform="translate(1000,264)">
+    <path d="M0 0 L0 16 L4.6 12.1 L8 18.4 L11.4 16.8 L8 10.5 L13.6 10.5 Z" fill="#FFFFFF" stroke="#0A0E16" stroke-width="1.2" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ===== transfer beam ===== -->
+  <path d="M1040 288 C 1074 250, 1094 250, 1124 292" stroke="url(#beam)" stroke-width="3.5" stroke-linecap="round" fill="none"/>
+  <!-- particles -->
+  <circle cx="1066" cy="270" r="3" fill="#67E8F9"/>
+  <circle cx="1092" cy="268" r="2.2" fill="#93C5FD"/>
+  <!-- glowing arrowhead -->
+  <circle cx="1124" cy="292" r="9" fill="#22D3EE" filter="url(#soft)"/>
+  <path d="M1124 283 L1138 292 L1124 301 Z" fill="#22D3EE"/>
+
+  <!-- ===== server node ===== -->
+  <g filter="url(#cardshadow)">
+    <rect x="1132" y="244" width="108" height="150" rx="15" fill="#FFFFFF" fill-opacity="0.055"/>
+    <rect x="1132" y="244" width="108" height="150" rx="15" stroke="#FFFFFF" stroke-opacity="0.12"/>
+    <!-- drive bays -->
+    <g>
+      <rect x="1146" y="268" width="80" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.10"/>
+      <circle cx="1214" cy="282" r="3.2" fill="#34D399"/>
+      <rect x="1154" y="280" width="34" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.18"/>
+    </g>
+    <g>
+      <rect x="1146" y="306" width="80" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.10"/>
+      <circle cx="1214" cy="320" r="3.2" fill="#34D399"/>
+      <rect x="1154" y="318" width="22" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.18"/>
+    </g>
+    <g>
+      <rect x="1146" y="344" width="80" height="28" rx="7" fill="#FFFFFF" fill-opacity="0.05" stroke="#FFFFFF" stroke-opacity="0.10"/>
+      <circle cx="1214" cy="358" r="3.2" fill="#FBBF24"/>
+      <rect x="1154" y="356" width="40" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.18"/>
+    </g>
+  </g>
+
+  <!-- bottom rule / footer line -->
+  <line x1="72" y1="560" x2="200" y2="560" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="2"/>
+  <text x="72" y="590" font-family="-apple-system,'SF Pro Text','PingFang SC',sans-serif" font-size="16" fill="#5E6E8C" letter-spacing="1.4">RIGHT-CLICK&#160;&#160;·&#160;&#160;SENT.</text>
+</svg>
