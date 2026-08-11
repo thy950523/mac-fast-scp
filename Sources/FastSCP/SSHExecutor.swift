@@ -40,12 +40,10 @@ actor SSHExecutor {
     }
 
     /// `scp -r -O <sources> <alias>:<path>`; `progress` receives parsed updates.
+    /// argv 由 `SCPCommandBuilder.sendArgs` 构造（远端路径经 shell 转义）。
     func transfer(alias: String, path: String, sources: [URL],
                   progress: @Sendable @escaping (SCPProgress?) -> Void) async throws {
-        var args = ["-r", SCPCommandBuilder.legacyProtocolFlag]
-        args.append(contentsOf: sources.map(\.path))
-        let safePath = path.hasSuffix("/") ? path : path + "/"
-        args.append("\(alias):\(safePath)")
+        let args = SCPCommandBuilder.sendArgs(alias: alias, remotePath: path, sources: sources)
         try await runWithProgress(args: args, progress: progress)
     }
 

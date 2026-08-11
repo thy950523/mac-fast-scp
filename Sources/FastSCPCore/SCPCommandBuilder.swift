@@ -25,9 +25,29 @@ public enum SCPCommandBuilder {
         let base = remotePath.hasSuffix("/") ? String(remotePath.dropLast()) : remotePath
         var args = ["-r", legacyProtocolFlag]
         for name in names {
-            args.append("\(alias):\(base)/\(name)")
+            // legacy 协议下 scp 在远端跑 `scp -f <path>`，路径过远端登录 shell。
+            // 文件名里的空格、括号等元字符必须转义，否则远端 bash 报语法错误、
+            // 拉取秒败、进程立刻退出——实测 2026-08-11 一个带 `( etc.)` 的文件名
+            // 触发 `syntax error near unexpected token ('(`，表现为既无实时进度、
+            // 取消也只剩 `process=false`。
+            args.append("\(alias):\(RemoteShell.quote("\(base)/\(name)"))")
         }
         args.append(localDest.path + "/")
+        return args
+    }
+
+    /// `scp -r -O <sources> <alias>:<quotedRemotePath>`
+    ///
+    /// 远端目标目录同样经 `RemoteShell.quote` 转义：legacy 协议下远端跑
+    /// `scp -t <path>`，含空格/括号等元字符的目录路径会触发同样的远端 bash
+    /// 语法错误（发送方向目前只是因为用户键入的目标路径通常没元字符才没炸）。
+    /// `remotePath` 会被规范化为带尾斜杠——scp 据此把源文件放进该目录而非
+    /// 把最后一个分量当成新文件名。
+    public static func sendArgs(alias: String, remotePath: String, sources: [URL]) -> [String] {
+        var args = ["-r", legacyProtocolFlag]
+        args.append(contentsOf: sources.map(\.path))
+        let normalized = remotePath.hasSuffix("/") ? remotePath : remotePath + "/"
+        args.append("\(alias):\(RemoteShell.quote(normalized))")
         return args
     }
 }
