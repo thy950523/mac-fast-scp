@@ -104,3 +104,54 @@ struct TransferStatusView: View {
         return m > 0 ? "剩余 \(m) 分 \(r) 秒" : "剩余 \(r) 秒"
     }
 }
+
+/// Phase-switching transfer UI shared by the send and receive panels.
+///
+/// This switch MUST live in a view that holds the tracker as `@ObservedObject`.
+/// When it lived inside `ReceiveView`/`DestinationView` as a plain function of a
+/// `let t`, SwiftUI never re-rendered it on `t.progress` changes: the parent
+/// observes the view model, not the tracker, so only the parent's `@Published`
+/// changes (e.g. setting `tracker = t`) re-evaluated the switch. Result: after
+/// cancelling (`t.fail("已取消")` → phase `.failed`) the panel stayed on the
+/// in-progress view with a dead cancel button — the user could keep clicking it
+/// (logs showed repeated `cancel() process=false`). The live progress bar still
+/// moved only because `TransferStatusView` itself `@ObservedObject`s the tracker;
+/// leaving the progress *branch* needs the parent to re-render.
+///
+/// Hoisting the switch into an `@ObservedObject` sub-view makes the phase change
+/// re-render at once. Wording follows `tracker.direction`.
+struct TransferPhaseView: View {
+    @ObservedObject var tracker: TransferTracker
+    let alias: String
+    let path: String
+    let onCancel: () -> Void
+    let onClose: () -> Void
+
+    private var p: TransferProgress { tracker.progress }
+    private var isReceive: Bool { p.direction == .receive }
+    private var cancelledTitle: String { isReceive ? "已取消接收" : "已取消传输" }
+    private var failedTitle: String { isReceive ? "接收失败" : "传输失败" }
+
+    var body: some View {
+        switch p.phase {
+        case .sending, .preparing:
+            TransferStatusView(tracker: tracker, alias: alias, path: path, onCancel: onCancel)
+        case .failed(let msg):
+            let cancelled = msg == "已取消"
+            VStack(spacing: 8) {
+                Image(systemName: cancelled ? "xmark.circle" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(cancelled ? Color.secondary : .orange)
+                Text(cancelled ? cancelledTitle : failedTitle)
+                    .font(.headline)
+                if !cancelled {
+                    Text(msg)
+                        .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
+                }
+                Button("关闭", role: .cancel) { onClose() }
+            }
+            .padding(.top, 8)
+        case .done:
+            EmptyView()
+        }
+    }
+}
