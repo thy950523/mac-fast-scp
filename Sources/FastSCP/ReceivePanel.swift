@@ -158,7 +158,11 @@ struct ReceiveView: View {
         VStack(spacing: 10) {
             if case .ok = viewModel.configStatus {
                 if let t = viewModel.tracker {
-                    transferBody(t)
+                    TransferPhaseView(tracker: t,
+                                      alias: viewModel.selectedAlias,
+                                      path: viewModel.currentPath,
+                                      onCancel: { viewModel.cancelTransfer() },
+                                      onClose: { onClose() })
                 } else {
                     serverPicker
                     pathField
@@ -179,32 +183,6 @@ struct ReceiveView: View {
         .padding(12)
         .frame(width: 360, height: 460)
         .task { await viewModel.loadHosts() }
-    }
-
-    @ViewBuilder
-    private func transferBody(_ t: TransferTracker) -> some View {
-        switch t.progress.phase {
-        case .sending, .preparing:
-            TransferStatusView(tracker: t,
-                               alias: viewModel.selectedAlias,
-                               path: viewModel.currentPath,
-                               onCancel: { viewModel.cancelTransfer() })
-        case .failed(let msg):
-            let cancelled = msg == "已取消"
-            VStack(spacing: 8) {
-                Image(systemName: cancelled ? "xmark.circle" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(cancelled ? Color.secondary : .orange)
-                Text(cancelled ? "已取消接收" : "接收失败").font(.headline)
-                if !cancelled {
-                    Text(msg)
-                        .font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary)
-                }
-                Button("关闭", role: .cancel) { onClose() }
-            }
-            .padding(.top, 8)
-        case .done:
-            EmptyView()
-        }
     }
 
     @ViewBuilder private var serverPicker: some View {
